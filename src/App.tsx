@@ -10,6 +10,7 @@ import {
 } from './lib/auth.ts'
 import Goals from './screens/Goals.tsx'
 import Chat from './screens/Chat.tsx'
+import Today from './screens/Today.tsx'
 import Workout from './screens/Workout.tsx'
 import History from './screens/History.tsx'
 import Settings from './screens/Settings.tsx'
@@ -96,25 +97,16 @@ function CallbackScreen() {
 
 // ─── Navigation ────────────────────────────────────────────────────────────────
 
-type ScreenId = 'workout' | 'chat' | 'goals' | 'history' | 'settings'
+type ScreenId = 'today' | 'workout' | 'chat' | 'goals' | 'history' | 'settings'
 
 const SCREENS: { id: ScreenId; label: string; icon: string }[] = [
-  { id: 'workout',  label: 'Today',    icon: '💪' },
+  { id: 'today',    label: 'Today',    icon: '📅' },
+  { id: 'workout',  label: 'Workouts', icon: '💪' },
   { id: 'chat',     label: 'Chat',     icon: '💬' },
   { id: 'goals',    label: 'Goals',    icon: '🎯' },
   { id: 'history',  label: 'Log',      icon: '📋' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ]
-
-function renderScreen(screen: ScreenId) {
-  switch (screen) {
-    case 'workout':  return <Workout />
-    case 'chat':     return <Chat />
-    case 'goals':    return <Goals />
-    case 'history':  return <History />
-    case 'settings': return <Settings />
-  }
-}
 
 // ─── Main app ─────────────────────────────────────────────────────────────────
 
@@ -124,7 +116,8 @@ export default function App() {
   const [authState, setAuthState] = useState<AuthState>('loading')
   const [apiKey, setApiKey] = useState<string>('')
   const [callbackError, setCallbackError] = useState<string | null>(null)
-  const [screen, setScreen] = useState<ScreenId>('workout')
+  const [screen, setScreen] = useState<ScreenId>('today')
+  const [chatStreaming, setChatStreaming] = useState(false)
 
   useEffect(() => {
     if (isCallbackUrl()) {
@@ -172,6 +165,36 @@ export default function App() {
       })
   }, [])
 
+  function handleTabChange(nextScreen: ScreenId) {
+    if (nextScreen === screen) return
+
+    if (screen === 'chat' && chatStreaming) {
+      const shouldLeave = window.confirm(
+        'Are you sure you want to change tabs? The agent is still developing a reply.',
+      )
+      if (!shouldLeave) return
+    }
+
+    setScreen(nextScreen)
+  }
+
+  function renderActiveScreen() {
+    switch (screen) {
+      case 'today':
+        return <Today />
+      case 'workout':
+        return <Workout />
+      case 'chat':
+        return <Chat onStreamingChange={setChatStreaming} />
+      case 'goals':
+        return <Goals />
+      case 'history':
+        return <History />
+      case 'settings':
+        return <Settings />
+    }
+  }
+
   if (authState === 'loading') {
     return null // blank while checking — avoids flash of login screen
   }
@@ -189,14 +212,14 @@ export default function App() {
       <ApiKeyContext.Provider value={apiKey}>
         <div className="app">
           <main className="screen">
-            {renderScreen(screen)}
+            {renderActiveScreen()}
           </main>
           <nav className="tab-bar">
             {SCREENS.map((s) => (
               <button
                 key={s.id}
                 className={`tab ${screen === s.id ? 'tab--active' : ''}`}
-                onClick={() => setScreen(s.id)}
+                onClick={() => handleTabChange(s.id)}
               >
                 <span className="tab__icon">{s.icon}</span>
                 <span className="tab__label">{s.label}</span>

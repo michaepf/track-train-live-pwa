@@ -1,6 +1,6 @@
 # Phase 6 - PWA Polish and UX Refinements
 
-Status: NOT STARTED
+Status: IN PROGRESS (6e complete, remainder not started)
 
 ## Goal
 
@@ -35,7 +35,21 @@ Finalize installability, offline behavior, and UX polish decisions.
 - [ ] Add tooltip/help text for model cost/smartness trade-off
 - [ ] Rework onboarding to structured intake form + AI refinement
 
-## 6e - Data Export and Recovery
+## 6e - Settings / Data Management (COMPLETE)
+
+- [x] Replaced ambiguous maintenance buttons with 5 clearly named actions:
+  - Disconnect OpenRouter
+  - Delete all goals info
+  - Delete workout history (completed workouts + summaries)
+  - Delete planned workouts (not yet completed)
+  - Delete everything (goals, workouts, chat, summaries — not settings/API key)
+- [x] Added `clearGoals`, `clearCompletedWorkouts`, `clearPlannedWorkouts` to `db.ts`
+- [x] Fixed `clearAllData` to preserve `settings` store (keeps OpenRouter token)
+- [x] Inline two-step confirmation (arm → Cancel / Confirm) replacing `window.confirm()`
+- [x] Two-column layout: button at ~45% width, description to the right
+- [x] Internal `scope` field (`user` | `both`) on each action for future agent restriction logic
+
+## 6f - Data Export and Recovery
 
 - [ ] Export all local stores to JSON
 - [ ] Validate clean import/recovery path (if in scope)

@@ -34,10 +34,22 @@ PWAs support push notifications, with a caveat: on iOS, the user must add the ap
 
 | Screen | Description |
 |--------|-------------|
-| **Goals** | User's current goals and profile, visible and editable. The persistent context for all AI conversations. |
+| **Today** | Day-of execution UI for completing/logging the current session. |
+| **Workouts** | Read/browse view of planned and saved workouts across dates. |
 | **Chat** | Conversational interface with the AI trainer. Used for planning, goal review, and ad hoc questions. |
-| **Today's Workout** | The existing workout tracking UI, carried over from the current app. |
+| **Goals** | User's current goals and profile, visible and editable (planned to move into Settings as polish). |
 | **History** | Bulleted view of past workout JSON records. |
+| **Settings** | Account/session controls, local data tools, and app configuration. |
+
+### Navigation IA Update (Feb 22, 2026)
+
+To reduce ambiguity between "plan browsing" and "workout execution":
+
+- `Today` and `Workouts` are separate tabs with different intent.
+- `Today` is the primary place to record sets, cardio difficulty, notes, and completion.
+- `Workouts` is a read-only verification/browse surface for accepted plans and saved sessions.
+- `Goals` content is expected to move into `Settings` in a polish pass.
+- Model selector is expected to move from `Settings` onto `Chat` in a polish pass.
 
 ---
 
@@ -76,7 +88,7 @@ Both triggers route the user into a goal review conversation. The review follows
 
 ## Tool Use Pattern
 
-The agent has two tools available during planning and goal conversations:
+The agent uses goal/planning tools, plus management tools for explicit cleanup requests:
 
 ### `propose_goals`
 Called when the agent is ready to propose goals text for user acceptance. Triggers a special UI card in the chat showing the proposed goals with **Accept** and **Edit** options. On acceptance, the goals text and timestamp are written to IndexedDB.
@@ -84,7 +96,17 @@ Called when the agent is ready to propose goals text for user acceptance. Trigge
 Used during: onboarding, goal review conversations.
 
 ### `propose_workout`
-Called when the agent is ready to propose a workout plan. Triggers a workout card in the chat with **Accept** and **Edit** options. On acceptance, the workout is written to IndexedDB and becomes accessible in Today's Workout.
+Called when the agent is ready to propose a workout plan. Triggers a workout card in the chat with **Accept** and **Edit** options. On acceptance, workouts are written to IndexedDB and become accessible in both `Workouts` and `Today`.
+
+Used during: planning conversations.
+
+### `delete_future_workouts`
+Called when the user explicitly asks to clear/replace upcoming sessions. Deletes only uncompleted future workouts (range-controlled).
+
+Used during: planning conversations.
+
+### `delete_workout_history`
+Called when the user explicitly asks to clear historical records for testing or reset scenarios. Deletes only historical workouts (range-controlled), with optional summary clearing.
 
 Used during: planning conversations.
 
@@ -153,11 +175,11 @@ AI proposals always create new workout records. Existing workouts are never impl
 
 ### Completion protection
 
-A workout is **completed** if any set or cardio option has a recorded `difficulty` value. Completed workouts are immutable — they cannot be overwritten or deleted by anything. This is an absolute rule.
+A workout is **completed** if any set/cardio difficulty is recorded or the user explicitly marks it complete in `Today`. Completed workouts are immutable — they cannot be overwritten or deleted by planning tools.
 
 ### Explicit delete
 
-Unstarted workouts (no difficulty values anywhere) can be deleted by the user via a delete control on the workout card in Today and History. The control disappears once any difficulty is recorded, making the workout permanent at that point.
+Unstarted workouts can be removed either via explicit delete tools in planning chat or UI affordances (where present). Completed workouts are protected.
 
 ---
 
@@ -174,4 +196,4 @@ Unstarted workouts (no difficulty values anywhere) can be deleted by the user vi
 
 ---
 
-*This document reflects design decisions made Feb 21, 2026. Schema and data model decisions updated Feb 21, 2026.*
+*This document reflects design decisions made Feb 21, 2026. Updated Feb 22, 2026 to align IA/tooling with current implementation.*

@@ -1,8 +1,28 @@
 import { useState, useEffect } from 'react'
-import { getSetting, setSetting, clearAllData } from '../lib/db.ts'
+import {
+  getSetting,
+  setSetting,
+  clearAllData,
+  clearGoals,
+  clearCompletedWorkouts,
+  clearPlannedWorkouts,
+} from '../lib/db.ts'
 import { logout } from '../lib/auth.ts'
 
 type ModelTier = 'premium' | 'affordable'
+type Scope = 'user' | 'both'
+
+interface ActionDef {
+  key: string
+  label: string
+  confirmLabel: string
+  busyLabel: string
+  description: string
+  scope: Scope
+  action: () => Promise<void>
+  /** If false, skip the page reload (e.g. logout() handles its own redirect). */
+  reload?: boolean
+}
 
 const MODEL_OPTIONS: { value: ModelTier; label: string; description: string }[] = [
   {
@@ -17,12 +37,65 @@ const MODEL_OPTIONS: { value: ModelTier; label: string; description: string }[] 
   },
 ]
 
+const ACCOUNT_ACTIONS: ActionDef[] = [
+  {
+    key: 'logout',
+    label: 'Disconnect OpenRouter',
+    confirmLabel: 'Confirm disconnect',
+    busyLabel: 'Disconnecting…',
+    description: 'Removes your stored API token from this device.',
+    scope: 'user',
+    action: logout,
+    reload: false, // logout() handles its own redirect
+  },
+]
+
+const DATA_ACTIONS: ActionDef[] = [
+  {
+    key: 'clearGoals',
+    label: 'Delete all goals info',
+    confirmLabel: 'Confirm: delete goals',
+    busyLabel: 'Deleting…',
+    description: 'Removes your stored training goals. Workouts and chat history are not affected.',
+    scope: 'user',
+    action: clearGoals,
+  },
+  {
+    key: 'clearHistory',
+    label: 'Delete workout history',
+    confirmLabel: 'Confirm: delete history',
+    busyLabel: 'Deleting…',
+    description: 'Removes completed workouts and weekly summaries. Planned workouts are not affected.',
+    scope: 'user',
+    action: clearCompletedWorkouts,
+  },
+  {
+    key: 'clearPlanned',
+    label: 'Delete planned workouts',
+    confirmLabel: 'Confirm: delete planned',
+    busyLabel: 'Deleting…',
+    description: 'Removes workouts not yet completed. Completed history is not affected.',
+    scope: 'both',
+    action: clearPlannedWorkouts,
+  },
+  {
+    key: 'deleteAll',
+    label: 'Delete everything',
+    confirmLabel: 'Confirm: delete everything',
+    busyLabel: 'Deleting…',
+    description:
+      'Wipes all local data on this device: goals, workouts, chat history, and summaries. Does not disconnect OpenRouter.',
+    scope: 'user',
+    action: clearAllData,
+  },
+]
+
 export default function Settings() {
   const [model, setModel] = useState<ModelTier>('affordable')
   const [saving, setSaving] = useState(false)
-  const [loggingOut, setLoggingOut] = useState(false)
-  const [resetting, setResetting] = useState(false)
-  const [resetError, setResetError] = useState<string | null>(null)
+  const [armedAction, setArmedAction] = useState<string | null>(null)
+  const [activeAction, setActiveAction] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     getSetting('model').then((stored) => {
@@ -39,26 +112,69 @@ export default function Settings() {
     setSaving(false)
   }
 
-  async function handleLogout() {
-    setLoggingOut(true)
-    await logout() // redirects — never returns
+  function arm(key: string) {
+    setArmedAction(key)
+    setActionError(null)
   }
 
-  async function handleResetData() {
-    const confirmed = window.confirm(
-      'Reset all local app data on this device?\n\nThis deletes goals, workouts, chat history, summaries, settings, and your saved API key.',
-    )
-    if (!confirmed) return
+  function disarm() {
+    setArmedAction(null)
+  }
 
-    setResetError(null)
-    setResetting(true)
+  async function execute(def: ActionDef) {
+    setArmedAction(null)
+    setActionError(null)
+    setActiveAction(def.key)
     try {
-      await clearAllData()
-      window.location.href = window.location.origin + window.location.pathname
-    } catch {
-      setResetError('Failed to reset local data. Please try again.')
-      setResetting(false)
+      await def.action()
+      if (def.reload !== false) {
+        window.location.href = window.location.origin + window.location.pathname
+      }
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : 'Something went wrong. Please try again.',
+      )
+      setActiveAction(null)
     }
+  }
+
+  const busy = activeAction !== null
+
+  function renderAction(def: ActionDef) {
+    const isArmed = armedAction === def.key
+    const isBusy = activeAction === def.key
+
+    return (
+      <div key={def.key} className="settings-action">
+        <div className="settings-action-controls">
+          {isArmed ? (
+            <div className="settings-confirm-row">
+              <button className="settings-cancel-btn" onClick={disarm} disabled={busy}>
+                Cancel
+              </button>
+              <button
+                className="settings-confirm-btn"
+                onClick={() => execute(def)}
+                disabled={busy}
+              >
+                {isBusy ? def.busyLabel : def.confirmLabel}
+              </button>
+            </div>
+          ) : (
+            <button
+              className="logout-btn"
+              onClick={() => arm(def.key)}
+              disabled={busy || saving}
+            >
+              {isBusy ? def.busyLabel : def.label}
+            </button>
+          )}
+        </div>
+        <div className="settings-action-side">
+          <span className="settings-action-desc">{def.description}</span>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -92,33 +208,13 @@ export default function Settings() {
 
       <section className="settings-section">
         <div className="settings-label">Account</div>
-        <button
-          className="logout-btn"
-          onClick={handleLogout}
-          disabled={loggingOut || resetting}
-        >
-          {loggingOut ? 'Logging out…' : 'Disconnect OpenRouter'}
-        </button>
-        <div className="settings-description" style={{ marginTop: 8 }}>
-          Clears your stored API token from this device.
-        </div>
+        {ACCOUNT_ACTIONS.map(renderAction)}
+      </section>
 
-        <button
-          className="logout-btn"
-          style={{ marginTop: 12 }}
-          onClick={handleResetData}
-          disabled={resetting || loggingOut}
-        >
-          {resetting ? 'Resetting…' : 'Reset All Local Data'}
-        </button>
-        <div className="settings-description" style={{ marginTop: 8 }}>
-          Starts over from scratch on this device.
-        </div>
-        {resetError && (
-          <div className="settings-description" style={{ marginTop: 8, color: '#e88' }}>
-            {resetError}
-          </div>
-        )}
+      <section className="settings-section">
+        <div className="settings-label">Data</div>
+        {DATA_ACTIONS.map(renderAction)}
+        {actionError && <div className="settings-error">{actionError}</div>}
       </section>
     </div>
   )

@@ -20,6 +20,8 @@ export const MessageSchema = z.object({
       arguments: z.string(), // raw JSON string from the model
     })
     .optional(),
+  // Internal messages (e.g. retry instructions) — sent to the API but not shown in the UI
+  hidden: z.boolean().optional(),
 })
 
 export type Message = z.infer<typeof MessageSchema>

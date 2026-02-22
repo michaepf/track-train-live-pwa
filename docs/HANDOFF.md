@@ -6,70 +6,76 @@ Last updated: 2026-02-22
 
 - Phase 1: DONE
 - Phase 2: DONE
-- Phase 3: READY TO START (workout planning tools and flow)
+- Phase 3: IN PROGRESS (tool flow implemented, polish ongoing)
+- Phase 4: IN PROGRESS (Today execution baseline + Workouts list shipped; 4a/4b gaps remain)
+- Phase 5: NOT STARTED
+- Phase 6: IN PROGRESS (6e Settings/Data management complete)
 
 ## Current Defaults
 
-- Premium model: `anthropic/claude-sonnet-4.6`
-- Affordable model: `z-ai/glm-5`
 - API mode: non-stream debug enabled (`DEBUG_NON_STREAM = true` in `src/lib/api.ts`)
 
 ## Known Working
 
-- OpenRouter auth flow
-- Goal proposal tool calls with GLM-5
-- Goals persistence and Goals tab visibility
-- Local reset via Settings (`Reset All Local Data`)
-- Markdown-like formatting now renders in chat/tool cards
-- Chat input box is taller and more usable
+- OpenRouter auth + `propose_workout` end-to-end (accept saves to IndexedDB, visible in Workouts tab)
+- Planning agent can delete future workouts via tools; history deletion is user-only via Settings
+- Conversational questions in planning mode answered without forcing a tool call
+- Exercise catalog enforced: unknown exerciseId values rejected at accept time with auto-retry
 
 ## Known Issues / Watch Items
 
-- `propose_workout` tool path is not implemented yet
-- Debug logs are currently noisy in `Chat.tsx` and `api.ts`
+- Provider responses can still vary widely; keep schema normalization + bounded retries
+- Some debug logs remain in `api.ts` during non-stream mode diagnostics
 - Stream mode was unstable during testing; keep non-stream until fixed
+- GLM-5 via Fireworks (OpenRouter) validated historical tool call arguments strictly — corrupted history from old debug sessions can cause 400s; use "New" conversation to clear, or clear data in Settings
 
-## Most Recent Fixes
+## Most Recent Fixes (this session)
 
-- Conversation type persistence update in `persistConv` to prevent blank chat after onboarding -> planning transition
-- Tool panel moved above input for better visibility
-- Model defaults updated to Sonnet 4.6 and GLM-5
-- Added safe markdown renderer component for chat/tool text
-- Increased chat input height for better UX
+- `src/data/exercises.ts`: added exercise catalog (30 exercises, ported from original app); exports `EXERCISE_MAP`, `getExerciseName()`, `buildCatalogPromptSection()`
+- `context.ts`: planning system prompt now injects full exercise catalog; `formatWorkout()` uses display names instead of raw IDs
+- `Chat.tsx`: `validateExerciseIds()` runs at accept time; unknown IDs trigger error + auto-retry; tool description + schema hint updated
+- `Today.tsx`: exercise display uses catalog name lookup (`getExerciseName`) instead of slug humanization
+- `Chat.tsx`: planning mode `toolChoice` changed from forced `propose_workout` to `'auto'`; model can now answer conversational questions without proposing a workout
+- `context.ts`: planning role/tool instructions updated — "answer questions conversationally; use propose_workout only when scheduling workouts"
+- `Chat.tsx`: removed "no tool call returned" error block that fired on every non-tool planning response
+- `conversation.ts`: added `hidden?: boolean` to `MessageSchema`; retry instructions are marked hidden and skipped in `MessageBubble`
+- `api.ts`: defensive JSON validation on historical tool call arguments — malformed arguments replaced with `'{}'` instead of causing provider 400
 
 ## Next 3 Tasks
 
-1. Implement `propose_workout` tool contract and payload validation in Chat/API flow
-2. Build workout proposal UI card + Accept/Request changes behavior (save workouts on accept)
-3. Keep non-stream mode for now, then clean debug logs after workout tool flow is stable
+1. **Finish Phase 4 gaps** — delete affordance for unstarted workouts in `Today` + warmup/cooldown checklist interactions (both are gym-blocking UX gaps)
+2. **Phase 5 start** — History screen (`History.tsx`) + seeded summarization validation; confirm older-week summaries feed into planning context correctly
+3. **Phase 3 cleanup** — remove `console.log` noise from `api.ts`, decide streaming vs non-stream permanently, wire lazy summarization execution path
 
 ## Files To Read First In New Session
 
 1. `docs/IMPLEMENTATION-PLAN.md`
-2. `docs/phases/PHASE-3.md`
+2. `docs/phases/PHASE-4.md`
 3. `docs/HANDOFF.md`
 
 ## Kickoff Prompt (copy/paste)
 
-Please continue Phase 3 in `track-train-live-pwa`.
+Please continue Phase 4 in `track-train-live-pwa`.
 
 Read first:
 1) `docs/IMPLEMENTATION-PLAN.md`
-2) `docs/phases/PHASE-3.md`
+2) `docs/phases/PHASE-4.md`
 3) `docs/HANDOFF.md`
-4) `docs/CONTRACTS.md` (if needed for invariants)
 
 Current state:
-- Phase 1 and 2 are done.
-- Onboarding and `propose_goals` are working better with `z-ai/glm-5`.
+- Phases 1 and 2 are done.
+- Phase 3 tool flow is working; some debug cleanup remains.
 - `DEBUG_NON_STREAM = true` is intentionally enabled in `src/lib/api.ts`.
-- Main missing capability: `propose_workout` tool flow.
+- `propose_workout` is implemented; accepted workouts save and appear in `Workouts`.
+- `Today` execution UI is live and writes progress back to IndexedDB.
+- Settings data management is complete (Phase 6e done).
+- Exercise catalog (`src/data/exercises.ts`) is enforced at accept time; planning prompt includes catalog.
+- Planning mode uses `toolChoice: 'auto'`; conversational questions work without forcing a tool call.
 
 Task focus for this session:
-1) Implement `propose_workout` tool contract and payload validation.
-2) Render workout proposal card(s) in Chat with Accept / Request changes.
-3) On Accept, persist workouts with current "always append" policy.
-4) Keep changes scoped to Phase 3 only.
+1) Add delete affordance for unstarted workouts in `Today` (`deleteWorkout(id)` already exists in db.ts).
+2) Implement warmup/cooldown checklist interactions (checkbox toggle + strike-through, autosave).
+3) Begin Phase 5: History screen + manual summarization trigger for validation.
 
 Constraints:
 - Do not refactor unrelated files.
@@ -79,7 +85,6 @@ Constraints:
   - affordable: `z-ai/glm-5`
 
 Done criteria:
-- User can ask for a weekly plan and receive a workout proposal tool card.
-- Accept saves workouts into IndexedDB and they can be loaded later.
-- Chat remains interactive after tool handling.
-
+- User can delete an unstarted workout from the Today tab.
+- Warmup/cooldown items can be checked off and persist on reload.
+- History screen shows past sessions grouped by date.

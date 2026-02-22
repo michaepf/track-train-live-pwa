@@ -8,7 +8,12 @@
  * - Goal review trigger logic
  */
 
-import type { Goals, Workout } from './schemas/index.ts'
+import {
+  isWorkoutCompleted,
+  type Goals,
+  type Workout,
+} from './schemas/index.ts'
+import { getExerciseName, buildCatalogPromptSection } from '../data/exercises.ts'
 
 // ─── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -122,7 +127,10 @@ function formatWorkout(workout: Workout): string {
     lines.push('Exercises:')
     for (const entry of workout.entries) {
       const setStrs = entry.sets.map(formatSet).join(', ')
-      lines.push(`  ${entry.exerciseId}: ${setStrs}`)
+      lines.push(`  ${getExerciseName(entry.exerciseId)}: ${setStrs}`)
+      if (entry.notes) {
+        lines.push(`    note: ${entry.notes}`)
+      }
     }
   }
 
@@ -132,6 +140,13 @@ function formatWorkout(workout: Workout): string {
       const diff = opt.difficulty ? ` [${opt.difficulty}]` : ''
       lines.push(`  ${opt.label}${diff}`)
     }
+  }
+
+  const latestUserFeedback = [...(workout.feedback ?? [])]
+    .reverse()
+    .find((f) => f.source === 'user')?.note
+  if (latestUserFeedback) {
+    lines.push(`User note: ${latestUserFeedback}`)
   }
 
   return lines.join('\n')
@@ -184,6 +199,37 @@ export function buildHistoryContext(
   return parts.join('\n\n')
 }
 
+/**
+ * Builds a compact summary of workouts already present in the current D0-D6
+ * planning window so the planner can avoid accidental duplicates/conflicts.
+ */
+export function buildUpcomingPlannedContext(workouts: Workout[]): string {
+  const windowDates = new Set(getPlanningWindow().map((d) => d.date))
+  const inWindow = workouts
+    .filter((w) => windowDates.has(w.date))
+    .sort((a, b) => {
+      const dateCmp = a.date.localeCompare(b.date)
+      return dateCmp !== 0 ? dateCmp : (a.id ?? 0) - (b.id ?? 0)
+    })
+
+  if (inWindow.length === 0) return ''
+
+  const lines = ['Existing workouts in D0-D6 window:']
+  for (const workout of inWindow) {
+    const status = isWorkoutCompleted(workout) ? 'completed' : 'planned'
+    const title = workout.session ?? workout.workoutType ?? 'workout'
+    const exerciseCount = workout.entries?.length ?? 0
+    const cardioCount = workout.cardioOptions?.length ?? 0
+    const detailParts: string[] = []
+    if (exerciseCount > 0) detailParts.push(`${exerciseCount} exercise${exerciseCount === 1 ? '' : 's'}`)
+    if (cardioCount > 0) detailParts.push(`${cardioCount} cardio option${cardioCount === 1 ? '' : 's'}`)
+    const detail = detailParts.length > 0 ? ` (${detailParts.join(', ')})` : ''
+    lines.push(`- ${workout.date}: ${title} [${status}]${detail}`)
+  }
+
+  return lines.join('\n')
+}
+
 // ─── System prompt builder ─────────────────────────────────────────────────────
 
 type ConvMode = 'onboarding' | 'goal_review' | 'planning'
@@ -193,7 +239,12 @@ const ROLE_INSTRUCTIONS: Record<ConvMode, string> = {
 
   goal_review: `You are an AI personal trainer reviewing a user's training goals. Acknowledge what's currently set, ask about recent changes or new priorities, and when ready, call \`propose_goals\` with an updated summary. Keep it focused — this should be a short review, not a full re-onboarding.`,
 
-  planning: `You are an AI personal trainer helping plan the user's workouts. Review the training history and goals provided, then propose a practical workout plan. When ready, call \`propose_workout\` with an array of workout objects — each using a date from the D0–D6 planning window. Always append new workouts; never attempt to replace or delete existing ones.`,
+  planning: `You are an AI personal trainer. Answer questions conversationally. When the user asks you to plan, schedule, add, or change workouts, call \`propose_workout\` with an array of workout objects — each using a date from the D0–D6 planning window. Always append new workouts; never attempt to replace or delete existing ones without explicit instruction.
+
+For user-facing text responses:
+- Do not use D0/D1/D2 labels in final wording; use real dates or weekday names.
+- Do not use markdown tables.
+- Prefer short plain text sections or bullet lists.`,
 }
 
 const TOOL_INSTRUCTIONS: Record<ConvMode, string> = {
@@ -201,7 +252,11 @@ const TOOL_INSTRUCTIONS: Record<ConvMode, string> = {
 
   goal_review: `Call \`propose_goals\` when you have an updated goals summary ready. The user will review and confirm. Do not narrate or describe the tool call in plain text — emit an actual tool call.`,
 
-  planning: `Call \`propose_workout\` with an array of workout objects. Each workout must use a date from the D0–D6 planning window shown below. You may propose 1–7 workouts in a single call.`,
+  planning: `Use \`propose_workout\` only when proposing or modifying the workout schedule. For general questions, answer directly without calling any tool.
+
+When proposing: call \`propose_workout\` with an array of 1–7 workout objects, each using a date from the D0–D6 planning window. Review "Existing Workouts in Planning Window" before proposing — append around existing sessions; do not duplicate them.
+
+Do not output markdown tables or D-label shorthand in user-visible text.`,
 }
 
 /**
@@ -215,6 +270,7 @@ export function buildSystemPrompt(
   goals: Goals | null,
   mode: ConvMode,
   historyContext = '',
+  upcomingContext = '',
 ): string {
   const window = getPlanningWindow()
   const windowStr = window.map((d, i) => `  D${i}: ${d.date} — ${d.label}`).join('\n')
@@ -228,6 +284,10 @@ export function buildSystemPrompt(
     ? `## Training History\n\n${historyContext}`
     : ''
 
+  const upcomingSection = upcomingContext
+    ? `## Existing Workouts in Planning Window\n\n${upcomingContext}`
+    : ''
+
   const sections = [
     `# Track Train Live — AI Trainer`,
     `Today: ${today}`,
@@ -235,6 +295,8 @@ export function buildSystemPrompt(
     `## Tool Instructions\n\n${TOOL_INSTRUCTIONS[mode]}`,
     `## Planning Window (D0–D6)\n\n${windowStr}`,
     goalsSection,
+    mode === 'planning' ? buildCatalogPromptSection() : '',
+    upcomingSection,
     historySection,
   ].filter(Boolean)
 

@@ -44,6 +44,7 @@ export interface StreamChatOpts {
   model: string
   messages: Message[]
   tools?: ToolDefinition[]
+  toolChoice?: 'auto' | 'required' | { type: 'function'; function: { name: string } }
   systemPrompt: string
   onDelta: (text: string) => void
   onDone: (result: StreamResult) => void
@@ -97,6 +98,14 @@ function buildApiMessages(systemPrompt: string, messages: Message[]): ApiMessage
     }
 
     if (msg.role === 'assistant' && msg.toolCall) {
+      // Guard against malformed arguments (e.g. partial streaming results stored from a
+      // previous debug session). Providers validate historical tool call JSON strictly.
+      let safeArguments = msg.toolCall.arguments
+      try {
+        JSON.parse(safeArguments)
+      } catch {
+        safeArguments = '{}'
+      }
       return {
         role: 'assistant',
         content: null,
@@ -106,7 +115,7 @@ function buildApiMessages(systemPrompt: string, messages: Message[]): ApiMessage
             type: 'function',
             function: {
               name: msg.toolCall.name,
-              arguments: msg.toolCall.arguments,
+              arguments: safeArguments,
             },
           },
         ],
@@ -139,7 +148,18 @@ const DEBUG_LOG_SSE = false
  * Callers must ensure no other streams are in flight before this redirect.
  */
 export async function streamChat(opts: StreamChatOpts): Promise<void> {
-  const { apiKey, model, messages, tools, systemPrompt, onDelta, onDone, onError, signal: externalSignal } = opts
+  const {
+    apiKey,
+    model,
+    messages,
+    tools,
+    toolChoice,
+    systemPrompt,
+    onDelta,
+    onDone,
+    onError,
+    signal: externalSignal,
+  } = opts
 
   console.log('[api] streamChat', { model, mode: DEBUG_NON_STREAM ? 'non-stream' : 'stream' })
 
@@ -163,6 +183,9 @@ export async function streamChat(opts: StreamChatOpts): Promise<void> {
         parameters: t.parameters,
       },
     }))
+    if (toolChoice) {
+      body.tool_choice = toolChoice
+    }
   }
 
   let response: Response

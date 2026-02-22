@@ -3,6 +3,7 @@ import { z } from 'zod'
 export const WORKOUT_SCHEMA_VERSION = 1
 
 const DifficultySchema = z.enum(['could_not_complete', 'completed', 'too_easy'])
+const WorkoutStatusSchema = z.enum(['planned', 'completed'])
 
 const SetSchema = z.object({
   // Reps-based or timed — one of these must be present (validated at the model layer, not enforced here)
@@ -79,6 +80,8 @@ export const WorkoutSchema = z.object({
   phase: z.number().int().positive().optional(),
   week: z.number().int().positive().optional(),
   session: z.string().optional(),
+  status: WorkoutStatusSchema.optional(),
+  completedAt: z.string().datetime().optional(),
   warmup: WarmupSchema.optional(),
   entries: z.array(EntrySchema).optional(),
   cardioOptions: z.array(CardioOptionSchema).optional(),
@@ -92,12 +95,9 @@ export type WorkoutEntry = z.infer<typeof EntrySchema>
 export type WorkoutSet = z.infer<typeof SetSchema>
 export type CardioOption = z.infer<typeof CardioOptionSchema>
 export type Difficulty = z.infer<typeof DifficultySchema>
+export type WorkoutStatus = z.infer<typeof WorkoutStatusSchema>
 
-/**
- * Returns true if a workout has any recorded difficulty values — i.e. the user
- * has started logging it. Completed workouts must never be overwritten.
- */
-export function isWorkoutCompleted(workout: Workout): boolean {
+function hasDifficultyCompletion(workout: Workout): boolean {
   const entriesCompleted = (workout.entries ?? []).some((entry) =>
     entry.sets.some((set) => set.difficulty !== undefined),
   )
@@ -105,6 +105,19 @@ export function isWorkoutCompleted(workout: Workout): boolean {
     (opt) => opt.difficulty !== undefined,
   )
   return entriesCompleted || cardioCompleted
+}
+
+export function getWorkoutStatus(workout: Workout): WorkoutStatus {
+  if (workout.status === 'completed') return 'completed'
+  return hasDifficultyCompletion(workout) ? 'completed' : 'planned'
+}
+
+/**
+ * Returns true if a workout has any recorded difficulty values — i.e. the user
+ * has started logging it. Completed workouts must never be overwritten.
+ */
+export function isWorkoutCompleted(workout: Workout): boolean {
+  return getWorkoutStatus(workout) === 'completed'
 }
 
 /**

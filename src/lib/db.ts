@@ -75,6 +75,12 @@ function idbReq<T>(request: IDBRequest<T>): Promise<T> {
   })
 }
 
+function getLocalToday(): string {
+  return new Date().toLocaleDateString('en-CA', {
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  })
+}
+
 // ─── Goals ────────────────────────────────────────────────────────────────────
 
 export async function getGoals(): Promise<Goals | null> {
@@ -237,6 +243,14 @@ export async function saveSummary(weekOf: string, text: string): Promise<void> {
   )
 }
 
+/** Clears all stored weekly summaries. */
+export async function clearSummaries(): Promise<void> {
+  const db = await getDB()
+  await idbReq(
+    db.transaction('summaries', 'readwrite').objectStore('summaries').clear(),
+  )
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 export async function getSetting(key: string): Promise<string | null> {
@@ -263,14 +277,69 @@ export async function deleteSetting(key: string): Promise<void> {
 
 // ─── Maintenance ───────────────────────────────────────────────────────────────
 
+/** Clears the stored goals record. */
+export async function clearGoals(): Promise<void> {
+  const db = await getDB()
+  await idbReq(
+    db.transaction('goals', 'readwrite').objectStore('goals').delete('current'),
+  )
+}
+
+/**
+ * Deletes all completed workouts (those with recorded difficulty values or
+ * an explicit completed status) and clears summaries.
+ */
+export async function clearCompletedWorkouts(): Promise<void> {
+  const db = await getDB()
+  const tx = db.transaction(['workouts', 'summaries'], 'readwrite')
+  const store = tx.objectStore('workouts')
+  const all: unknown[] = await idbReq(store.getAll())
+
+  for (const raw of all) {
+    const workout = migrateWorkout(raw)
+    if (workout.id !== undefined && isWorkoutCompleted(workout)) {
+      store.delete(workout.id)
+    }
+  }
+
+  tx.objectStore('summaries').clear()
+
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/** Deletes all planned (not yet completed) workouts. */
+export async function clearPlannedWorkouts(): Promise<void> {
+  const db = await getDB()
+  const tx = db.transaction('workouts', 'readwrite')
+  const store = tx.objectStore('workouts')
+  const all: unknown[] = await idbReq(store.getAll())
+
+  for (const raw of all) {
+    const workout = migrateWorkout(raw)
+    if (workout.id !== undefined && !isWorkoutCompleted(workout)) {
+      store.delete(workout.id)
+    }
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
 /**
  * Clears all local app data from IndexedDB (goals, workouts, conversations,
- * summaries, settings). Useful for "start over" flows in development and UI.
+ * summaries). Does NOT touch settings, so the OpenRouter API key is preserved.
  */
 export async function clearAllData(): Promise<void> {
   const db = await getDB()
   const tx = db.transaction(
-    ['goals', 'workouts', 'conversations', 'summaries', 'settings'],
+    ['goals', 'workouts', 'conversations', 'summaries'],
     'readwrite',
   )
 
@@ -278,7 +347,51 @@ export async function clearAllData(): Promise<void> {
   tx.objectStore('workouts').clear()
   tx.objectStore('conversations').clear()
   tx.objectStore('summaries').clear()
-  tx.objectStore('settings').clear()
+
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/**
+ * Clears workout-related data only (workouts + summaries), preserving goals,
+ * conversations, and settings.
+ */
+export async function clearWorkoutsOnly(): Promise<void> {
+  const db = await getDB()
+  const tx = db.transaction(['workouts', 'summaries'], 'readwrite')
+
+  tx.objectStore('workouts').clear()
+  tx.objectStore('summaries').clear()
+
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/**
+ * Clears historical workout records (dates before local-today) and summaries,
+ * preserving today's/future workouts, goals, conversations, and settings.
+ */
+export async function clearWorkoutHistory(): Promise<void> {
+  const db = await getDB()
+  const today = getLocalToday()
+  const tx = db.transaction(['workouts', 'summaries'], 'readwrite')
+  const store = tx.objectStore('workouts')
+  const all: unknown[] = await idbReq(store.getAll())
+
+  for (const raw of all) {
+    const workout = migrateWorkout(raw)
+    if (workout.id !== undefined && workout.date < today) {
+      store.delete(workout.id)
+    }
+  }
+
+  tx.objectStore('summaries').clear()
 
   await new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve()

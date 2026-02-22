@@ -1,20 +1,46 @@
 import { useState, useEffect, useRef } from 'react'
 import { streamChat, MODELS } from '../lib/api.ts'
-import { buildSystemPrompt, buildHistoryContext, needsGoalReview, getWeekKey } from '../lib/context.ts'
+import { EXERCISE_MAP } from '../data/exercises.ts'
+import {
+  buildSystemPrompt,
+  buildHistoryContext,
+  buildUpcomingPlannedContext,
+  needsGoalReview,
+  getWeekKey,
+  getPlanningWindow,
+  getToday,
+} from '../lib/context.ts'
 import { useApiKey } from '../App.tsx'
 import {
   getGoals,
   saveGoals,
+  saveWorkout,
   saveConversation,
   listConversations,
   listWorkouts,
+  deleteWorkout,
   getSummary,
   getSetting,
 } from '../lib/db.ts'
-import { GoalsSchema, ProposeGoalsPayloadSchema } from '../lib/schemas/index.ts'
-import type { Goals, Conversation, Message, ConversationType } from '../lib/schemas/index.ts'
+import {
+  GoalsSchema,
+  WorkoutSchema,
+  ProposeGoalsPayloadSchema,
+  ProposeWorkoutsPayloadSchema,
+} from '../lib/schemas/index.ts'
+import type {
+  Goals,
+  Conversation,
+  Message,
+  ConversationType,
+  ProposeWorkoutsPayload,
+} from '../lib/schemas/index.ts'
 import type { StreamResult } from '../lib/api.ts'
-import { ProposeGoalsCard, ToolErrorCard } from '../components/ToolCard.tsx'
+import {
+  ProposeGoalsCard,
+  ProposeWorkoutCard,
+  ToolErrorCard,
+} from '../components/ToolCard.tsx'
 import MarkdownText from '../components/MarkdownText.tsx'
 
 // ─── Tool definitions ──────────────────────────────────────────────────────────
@@ -36,6 +62,51 @@ const PROPOSE_GOALS_TOOL = {
   },
 }
 
+const PROPOSE_WORKOUT_TOOL = {
+  name: 'propose_workout',
+  description:
+    'Propose one or more workouts for the D0-D6 planning window. Use one array item per planned day. Each entry exerciseId must be a valid ID from the Exercise Catalog in the system prompt.',
+  parameters: {
+    type: 'object',
+    properties: {
+      workouts: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 7,
+        items: {
+          type: 'object',
+          properties: {
+            date: { type: 'string', description: 'Workout date in YYYY-MM-DD format within D0-D6.' },
+            workoutType: { type: 'string' },
+            session: { type: 'string' },
+            warmup: { type: 'object' },
+            entries: { type: 'array' },
+            cardioOptions: { type: 'array' },
+            cardioMode: { type: 'string', enum: ['pick_one', 'pick_many'] },
+            cooldown: { type: ['array', 'object'] },
+          },
+          required: ['date', 'workoutType'],
+        },
+      },
+    },
+    required: ['workouts'],
+  },
+}
+
+const DELETE_FUTURE_WORKOUTS_TOOL = {
+  name: 'delete_future_workouts',
+  description:
+    'Delete uncompleted planned workouts in a future date range. Use when the user asks to clear or replace upcoming workouts.',
+  parameters: {
+    type: 'object',
+    properties: {
+      fromDate: { type: 'string', description: 'Optional inclusive start date YYYY-MM-DD.' },
+      toDate: { type: 'string', description: 'Optional inclusive end date YYYY-MM-DD.' },
+      includeToday: { type: 'boolean', description: 'If true, include D0 in deletion range.' },
+    },
+  },
+}
+
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 type PendingTool = {
@@ -46,18 +117,255 @@ type PendingTool = {
 
 type ToolCardState =
   | { kind: 'goals'; text: string }
+  | { kind: 'workouts'; workouts: ProposeWorkoutsPayload }
   | { kind: 'error'; toolName: string; message: string }
 
+type ToolExecution =
+  | {
+      kind: 'delete_future_workouts'
+      fromDate?: string
+      toDate?: string
+      includeToday?: boolean
+    }
+
 const MAX_FAKE_TOOL_RETRIES = 2
+const MAX_TOOL_VALIDATION_RETRIES = 2
+const ONBOARDING_WELCOME_MESSAGE = `Hey there! 👋 Welcome to Track Train Live — I'm your AI personal trainer, and I'm excited to help you get started on your fitness journey. Before we build a plan together, I'd love to get to know you a bit. Let's start simple:
+
+What's your current experience with exercise or training? Are you just getting started, coming back after a break, or already pretty consistent with workouts?`
 
 function looksLikeFakeToolNarration(text: string): boolean {
   const t = text.toLowerCase()
   return (
     t.includes('propose_goals') ||
+    t.includes('propose_workout') ||
     t.includes('calling the tool') ||
     t.includes('call the tool') ||
-    t.includes('function propose_goals')
+    t.includes('function propose_goals') ||
+    t.includes('function propose_workout')
   )
+}
+
+function validateWorkoutDatesInPlanningWindow(
+  workouts: ProposeWorkoutsPayload,
+): string | null {
+  const allowedDates = new Set(getPlanningWindow().map((d) => d.date))
+  const invalidDates = workouts
+    .map((w) => w.date)
+    .filter((date) => !allowedDates.has(date))
+
+  if (invalidDates.length === 0) return null
+  const unique = [...new Set(invalidDates)]
+  return `Workout dates must be in the D0-D6 planning window. Invalid date(s): ${unique.join(', ')}`
+}
+
+function validateExerciseIds(workouts: ProposeWorkoutsPayload): string | null {
+  const unknown: string[] = []
+  for (const workout of workouts) {
+    for (const entry of workout.entries ?? []) {
+      if (!(entry.exerciseId in EXERCISE_MAP)) {
+        unknown.push(entry.exerciseId)
+      }
+    }
+  }
+  if (unknown.length === 0) return null
+  const unique = [...new Set(unknown)]
+  return `Unknown exerciseId(s): ${unique.join(', ')}. Use only IDs from the Exercise Catalog in the system prompt.`
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value.trim() : undefined
+}
+
+function parseIntFromValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return Math.round(value)
+  }
+  if (typeof value === 'string') {
+    const match = value.match(/\d+/)
+    if (match) return Number(match[0])
+  }
+  return undefined
+}
+
+function slugifyExerciseId(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function buildLooseSet(
+  setLike: Record<string, unknown>,
+  fallbackReps?: number,
+): { plannedReps?: number; targetSeconds?: number; plannedDuration?: string; plannedWeight?: number; rpeTarget?: number } {
+  const plannedReps = parseIntFromValue(setLike.plannedReps) ?? parseIntFromValue(setLike.reps) ?? fallbackReps
+  const targetSeconds = parseIntFromValue(setLike.targetSeconds) ?? parseIntFromValue(setLike.seconds)
+  const plannedDuration = asString(setLike.plannedDuration) ?? asString(setLike.duration)
+  const plannedWeight = parseIntFromValue(setLike.plannedWeight) ?? parseIntFromValue(setLike.load)
+  const rpeTarget = parseIntFromValue(setLike.rpeTarget)
+
+  const normalized = {
+    ...(plannedReps ? { plannedReps } : {}),
+    ...(targetSeconds ? { targetSeconds } : {}),
+    ...(plannedDuration ? { plannedDuration } : {}),
+    ...(plannedWeight ? { plannedWeight } : {}),
+    ...(rpeTarget ? { rpeTarget } : {}),
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : { plannedReps: fallbackReps ?? 8 }
+}
+
+function normalizeWorkoutEntries(value: unknown): unknown[] | undefined {
+  if (!Array.isArray(value)) return undefined
+
+  const normalized = value
+    .map((entryRaw) => {
+      if (typeof entryRaw === 'string') {
+        const exerciseId = slugifyExerciseId(entryRaw)
+        if (!exerciseId) return null
+        return { exerciseId, sets: [{ plannedReps: 8 }] }
+      }
+
+      const entry = asRecord(entryRaw)
+      if (!entry) return null
+
+      const exerciseName = asString(entry.exerciseId) ?? asString(entry.exercise) ?? asString(entry.name)
+      if (!exerciseName) return null
+
+      const exerciseId = slugifyExerciseId(exerciseName)
+      if (!exerciseId) return null
+
+      const fallbackReps = parseIntFromValue(entry.reps)
+      let sets: unknown[] = []
+      if (Array.isArray(entry.sets)) {
+        sets = entry.sets
+          .map((setRaw) => {
+            const setObj = asRecord(setRaw)
+            return setObj ? buildLooseSet(setObj, fallbackReps) : null
+          })
+          .filter((setValue): setValue is Record<string, unknown> => !!setValue)
+      } else if (typeof entry.sets === 'number' && entry.sets > 0) {
+        const setCount = Math.min(Math.round(entry.sets), 8)
+        sets = Array.from({ length: setCount }, () => buildLooseSet(entry, fallbackReps))
+      } else {
+        sets = [buildLooseSet(entry, fallbackReps)]
+      }
+
+      const noteParts = [asString(entry.load), asString(entry.notes), asString(entry.description)].filter(
+        (x): x is string => !!x,
+      )
+
+      return {
+        exerciseId,
+        sets,
+        ...(noteParts.length > 0 ? { aiNotes: noteParts.join(' | ').slice(0, 500) } : {}),
+      }
+    })
+    .filter(Boolean)
+
+  return normalized.length > 0 ? normalized : undefined
+}
+
+function normalizeCardioOptions(value: unknown): unknown[] | undefined {
+  if (!Array.isArray(value)) return undefined
+
+  const normalized = value
+    .map((optionRaw) => {
+      if (typeof optionRaw === 'string') {
+        const label = optionRaw.trim()
+        return label ? { label } : null
+      }
+
+      const option = asRecord(optionRaw)
+      if (!option) return null
+      const label = asString(option.label) ?? asString(option.name) ?? asString(option.exercise)
+      if (!label) return null
+
+      return {
+        label,
+        ...(asString(option.target) ? { target: asString(option.target) } : {}),
+        ...(asString(option.notes) ? { aiNotes: asString(option.notes)?.slice(0, 500) } : {}),
+      }
+    })
+    .filter(Boolean)
+
+  return normalized.length > 0 ? normalized : undefined
+}
+
+function normalizeWorkoutPayloads(candidate: unknown): unknown {
+  if (!Array.isArray(candidate)) return candidate
+
+  return candidate.map((workoutRaw) => {
+    const workout = asRecord(workoutRaw)
+    if (!workout) return workoutRaw
+
+    const entries = normalizeWorkoutEntries(workout.entries)
+    const cardioOptions = normalizeCardioOptions(workout.cardioOptions)
+    const workoutType = asString(workout.workoutType) ?? 'general'
+    const session = asString(workout.session)
+    const date = asString(workout.date)
+    const cardioMode = asString(workout.cardioMode)
+
+    return {
+      ...(date ? { date } : {}),
+      workoutType,
+      ...(session ? { session } : {}),
+      ...(entries ? { entries } : {}),
+      ...(cardioOptions ? { cardioOptions } : {}),
+      ...(cardioMode === 'pick_one' || cardioMode === 'pick_many'
+        ? { cardioMode }
+        : {}),
+    }
+  })
+}
+
+function summarizeSchemaIssues(error: { issues: { path: (string | number)[]; message: string }[] }): string {
+  const snippets = error.issues.slice(0, 3).map((issue) => {
+    const path = issue.path.length > 0 ? issue.path.join('.') : 'payload'
+    return `${path}: ${issue.message}`
+  })
+  if (snippets.length === 0) return 'Invalid workout proposal'
+  return `Invalid workout proposal. ${snippets.join(' | ')}`
+}
+
+function isIsoDate(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+function addDays(date: string, days: number): string {
+  const d = new Date(`${date}T12:00:00`)
+  d.setDate(d.getDate() + days)
+  return d.toLocaleDateString('en-CA', {
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  })
+}
+
+
+function getToolSchemaHint(toolName: string): string {
+  if (toolName === 'propose_workout') {
+    return [
+      'Strict schema reminder for propose_workout:',
+      '- arguments must be JSON: {"workouts":[...]} (or equivalent array payload).',
+      '- each workout must include: date (YYYY-MM-DD within D0-D6) and workoutType (string).',
+      '- entries (if present) must be: [{ exerciseId: string, sets: [...] }] where exerciseId must exactly match a catalog ID from the system prompt.',
+      '- cardioOptions (if present) must be: [{ label: string, target?: string }].',
+      '- each workout must include at least one of entries or cardioOptions.',
+    ].join('\n')
+  }
+  if (toolName === 'propose_goals') {
+    return [
+      'Strict schema reminder for propose_goals:',
+      '- arguments must be JSON object with { "text": string }.',
+      '- text must be non-empty and <= 2000 chars.',
+    ].join('\n')
+  }
+  return `Strict schema reminder: emit a valid ${toolName} tool call with correctly typed JSON arguments.`
 }
 
 // ─── Tool call resolution (synchronous) ───────────────────────────────────────
@@ -72,6 +380,7 @@ function looksLikeFakeToolNarration(text: string): boolean {
  */
 function resolveToolCall(tc: PendingTool):
   | { kind: 'card'; cardState: ToolCardState }
+  | { kind: 'execute'; execution: ToolExecution }
   | { kind: 'error'; message: string; toolName: string } {
   if (tc.name === 'propose_goals') {
     try {
@@ -86,6 +395,73 @@ function resolveToolCall(tc: PendingTool):
       return { kind: 'error', message: 'Failed to parse goals proposal', toolName: tc.name }
     }
   }
+  if (tc.name === 'propose_workout') {
+    try {
+      const raw = JSON.parse(tc.arguments) as unknown
+      const candidate =
+        Array.isArray(raw) || raw === null
+          ? raw
+          : (raw as { workouts?: unknown }).workouts
+      const strictResult = ProposeWorkoutsPayloadSchema.safeParse(candidate)
+
+      const result = strictResult.success
+        ? strictResult
+        : ProposeWorkoutsPayloadSchema.safeParse(normalizeWorkoutPayloads(candidate))
+
+      if (!result.success) {
+        return {
+          kind: 'error',
+          message: summarizeSchemaIssues(result.error),
+          toolName: tc.name,
+        }
+      }
+
+      const dateIssue = validateWorkoutDatesInPlanningWindow(result.data)
+      if (dateIssue) {
+        return { kind: 'error', message: dateIssue, toolName: tc.name }
+      }
+
+      const exerciseIssue = validateExerciseIds(result.data)
+      if (exerciseIssue) {
+        return { kind: 'error', message: exerciseIssue, toolName: tc.name }
+      }
+
+      return { kind: 'card', cardState: { kind: 'workouts', workouts: result.data } }
+    } catch {
+      return { kind: 'error', message: 'Failed to parse workout proposal', toolName: tc.name }
+    }
+  }
+  if (tc.name === 'delete_future_workouts') {
+    try {
+      const raw = JSON.parse(tc.arguments) as unknown
+      const payload = (raw && typeof raw === 'object' ? raw : {}) as {
+        fromDate?: unknown
+        toDate?: unknown
+        includeToday?: unknown
+      }
+
+      if (payload.fromDate !== undefined && !isIsoDate(payload.fromDate)) {
+        return { kind: 'error', message: 'fromDate must be YYYY-MM-DD', toolName: tc.name }
+      }
+      if (payload.toDate !== undefined && !isIsoDate(payload.toDate)) {
+        return { kind: 'error', message: 'toDate must be YYYY-MM-DD', toolName: tc.name }
+      }
+      if (payload.fromDate && payload.toDate && payload.fromDate > payload.toDate) {
+        return { kind: 'error', message: 'fromDate must be <= toDate', toolName: tc.name }
+      }
+      return {
+        kind: 'execute',
+        execution: {
+          kind: 'delete_future_workouts',
+          fromDate: payload.fromDate,
+          toDate: payload.toDate,
+          includeToday: payload.includeToday === true,
+        },
+      }
+    } catch {
+      return { kind: 'error', message: 'Failed to parse delete request', toolName: tc.name }
+    }
+  }
   // Unknown tool — auto-error so input never deadlocks
   return { kind: 'error', message: `Unknown tool: ${tc.name}`, toolName: tc.name }
 }
@@ -95,6 +471,10 @@ function resolveToolCall(tc: PendingTool):
 function MessageBubble({ message }: { message: Message }) {
   // Tool result messages are not shown in the UI
   if (message.role === 'tool') return null
+  // Internal messages (e.g. retry instructions) — sent to the API but not shown
+  if (message.hidden) return null
+  // Skip empty assistant bubbles (can happen when provider returns no text)
+  if (message.role === 'assistant' && !message.content.trim()) return null
   // Assistant messages with a tool call but no text content have nothing to show
   if (message.role === 'assistant' && message.toolCall && !message.content) return null
 
@@ -109,7 +489,11 @@ function MessageBubble({ message }: { message: Message }) {
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
-export default function Chat() {
+interface ChatProps {
+  onStreamingChange?: (streaming: boolean) => void
+}
+
+export default function Chat({ onStreamingChange }: ChatProps) {
   const apiKey = useApiKey()
 
   const [goals, setGoals] = useState<Goals | null>(null)
@@ -121,6 +505,7 @@ export default function Chat() {
   const [streaming, setStreaming] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
   const [streamError, setStreamError] = useState<string | null>(null)
+  const [toolActionBusy, setToolActionBusy] = useState(false)
 
   const [input, setInput] = useState('')
   const [toolCard, setToolCard] = useState<ToolCardState | null>(null)
@@ -131,6 +516,7 @@ export default function Chat() {
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fakeToolRetryRef = useRef(0)
+  const toolValidationRetryRef = useRef(0)
 
   // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -157,6 +543,10 @@ export default function Chat() {
       if (existing) {
         setConv(existing)
         setMessages(existing.messages)
+      } else if (convMode === 'onboarding') {
+        // On first-run onboarding, seed a local welcome message so users can
+        // reply immediately without waiting for a model kickoff turn.
+        setMessages([{ role: 'assistant', content: ONBOARDING_WELCOME_MESSAGE }])
       }
 
       setInitialized(true)
@@ -177,22 +567,25 @@ export default function Chat() {
     }
   }, [])
 
+  useEffect(() => {
+    onStreamingChange?.(streaming)
+  }, [streaming, onStreamingChange])
+
   // Safety net: if pendingTool exists but no actionable goals card is visible,
   // clear pending state so input never stays locked.
   useEffect(() => {
-    console.log('[chat] safety-net effect', { hasPendingTool: !!pendingTool, toolCardKind: toolCard?.kind })
-    if (pendingTool && toolCard?.kind !== 'goals') {
-      console.log('[chat] safety-net CLEARING pendingTool')
+    const hasActionableCard = toolCard?.kind === 'goals' || toolCard?.kind === 'workouts'
+    if (pendingTool && !hasActionableCard) {
       setPendingTool(null)
     }
   }, [pendingTool, toolCard])
 
-  // Auto-start greeting for onboarding and goal_review with empty thread
+  // Auto-start greeting for goal_review with empty thread.
+  // Onboarding uses a local seeded welcome message instead.
   useEffect(() => {
-    console.log('[chat] auto-start check', { initialized, mode, model, messageCount: messages.length, streaming, apiKey: !!apiKey })
     if (
       initialized &&
-      (mode === 'onboarding' || mode === 'goal_review') &&
+      mode === 'goal_review' &&
       messages.length === 0 &&
       !streaming &&
       model
@@ -208,6 +601,33 @@ export default function Chat() {
   }, [initialized])
 
   // ─── Streaming ───────────────────────────────────────────────────────────────
+
+  async function executeToolAction(exec: ToolExecution): Promise<string> {
+    const allWorkouts = await listWorkouts(10000)
+    const today = getToday()
+
+    if (exec.kind === 'delete_future_workouts') {
+      const start = exec.fromDate ?? (exec.includeToday ? today : addDays(today, 1))
+      const end = exec.toDate ?? '9999-12-31'
+
+      let deleted = 0
+      let skipped = 0
+      for (const workout of allWorkouts) {
+        if (workout.date < start || workout.date > end) continue
+        if (!workout.id) continue
+        try {
+          await deleteWorkout(workout.id)
+          deleted += 1
+        } catch {
+          skipped += 1
+        }
+      }
+
+      return `Deleted ${deleted} future workout${deleted === 1 ? '' : 's'} (skipped ${skipped} completed).`
+    }
+
+    return 'No action.'
+  }
 
   /**
    * Core stream function. All mutable state is passed explicitly to avoid
@@ -225,7 +645,6 @@ export default function Chat() {
     currentModel: string,
   ) {
     if (!apiKey || !currentModel) {
-      console.log('[chat] doStream early return — missing apiKey or model', { hasApiKey: !!apiKey, currentModel })
       return
     }
 
@@ -239,35 +658,42 @@ export default function Chat() {
 
     // Build history context for planning (inject recent workout data)
     let historyContext = ''
+    let upcomingContext = ''
     if (currentMode === 'planning') {
-      const recentWorkouts = await listWorkouts(30)
+      const knownWorkouts = await listWorkouts(100)
       const summaryMap = new Map<string, string>()
-      // Load summaries for weeks older than 3 weeks (recentWorkouts is sorted desc)
+      // Load summaries for weeks older than 3 weeks (knownWorkouts is sorted desc)
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
       const cutoff = new Date()
       cutoff.setDate(cutoff.getDate() - 21)
       const cutoffStr = cutoff.toLocaleDateString('en-CA', { timeZone: tz })
       const olderWeekKeys = [
         ...new Set(
-          recentWorkouts.filter((w) => w.date < cutoffStr).map((w) => getWeekKey(w.date)),
+          knownWorkouts.filter((w) => w.date < cutoffStr).map((w) => getWeekKey(w.date)),
         ),
       ]
       for (const wk of olderWeekKeys) {
         const summary = await getSummary(wk)
         if (summary) summaryMap.set(wk, summary)
       }
-      historyContext = buildHistoryContext(recentWorkouts, summaryMap)
+      historyContext = buildHistoryContext(knownWorkouts, summaryMap)
+      upcomingContext = buildUpcomingPlannedContext(knownWorkouts)
     }
 
     const tools =
-      currentMode === 'onboarding' || currentMode === 'goal_review' ? [PROPOSE_GOALS_TOOL] : []
+      currentMode === 'onboarding' || currentMode === 'goal_review'
+        ? [PROPOSE_GOALS_TOOL]
+        : currentMode === 'planning'
+          ? [PROPOSE_WORKOUT_TOOL, DELETE_FUTURE_WORKOUTS_TOOL]
+          : []
 
     await streamChat({
       apiKey,
       model: currentModel,
       messages: thread,
       tools,
-      systemPrompt: buildSystemPrompt(currentGoals, currentMode, historyContext),
+      toolChoice: currentMode === 'planning' ? 'auto' : undefined,
+      systemPrompt: buildSystemPrompt(currentGoals, currentMode, historyContext, upcomingContext),
       signal: abortRef.current.signal,
 
       onDelta: (text) => {
@@ -292,8 +718,6 @@ export default function Chat() {
         if (result.toolCall) {
           const tc: PendingTool = result.toolCall
           const resolved = resolveToolCall(tc)
-          console.log('[chat] onDone resolveToolCall:', resolved.kind, resolved.kind === 'error' ? resolved.message : resolved.cardState)
-
           if (resolved.kind === 'error') {
             // Auto-resolve: append tool error result so the thread stays valid.
             // Input remains enabled — user can keep chatting.
@@ -306,10 +730,55 @@ export default function Chat() {
               },
             ]
             setToolCard({ kind: 'error', toolName: resolved.toolName, message: resolved.message })
-            // pendingTool stays null — no user interaction needed
+
+            if (toolValidationRetryRef.current < MAX_TOOL_VALIDATION_RETRIES) {
+              toolValidationRetryRef.current += 1
+              const retryInstruction: Message = {
+                role: 'user',
+                hidden: true,
+                content:
+                  `The previous ${tc.name} tool call was invalid: ${resolved.message}. ` +
+                  `Please retry now by emitting a valid ${tc.name} tool call with corrected arguments. ` +
+                  'Do not respond with plain text.\n\n' +
+                  getToolSchemaHint(tc.name),
+              }
+              const retryThread = [...finalMessages, retryInstruction]
+              setMessages(retryThread)
+              const savedConv = await persistConv(retryThread, currentConv, currentMode)
+              await doStream(retryThread, savedConv, currentMode, currentGoals, currentModel)
+              return
+            }
+            // Retry cap reached — leave error visible and keep input enabled.
+          } else if (resolved.kind === 'execute') {
+            try {
+              const outcome = await executeToolAction(resolved.execution)
+              finalMessages = [
+                ...finalMessages,
+                {
+                  role: 'tool' as const,
+                  content: outcome,
+                  toolCallId: tc.id,
+                },
+                {
+                  role: 'assistant',
+                  content: outcome,
+                },
+              ]
+            } catch (err) {
+              const detail = err instanceof Error ? err.message : String(err)
+              finalMessages = [
+                ...finalMessages,
+                {
+                  role: 'tool' as const,
+                  content: `Error: ${detail}`,
+                  toolCallId: tc.id,
+                },
+              ]
+              setToolCard({ kind: 'error', toolName: tc.name, message: detail })
+            }
           } else {
             // Valid tool call — user must accept or reject before thread continues
-            console.log('[chat] onDone setting pendingTool + toolCard (goals)')
+            toolValidationRetryRef.current = 0
             setPendingTool(tc)
             setToolCard(resolved.cardState)
             // Do NOT append a tool result yet; that happens on accept/reject
@@ -317,20 +786,21 @@ export default function Chat() {
         }
 
         setMessages(finalMessages)
-        const savedConv = await persistConv(finalMessages, currentConv, currentMode)
+        await persistConv(finalMessages, currentConv, currentMode)
 
-        // Keep onboarding/goal-review conversational, but recover if the model
+        // Keep tool-driven flows conversational, but recover if the model
         // narrates a fake tool call in plain text instead of emitting tool_calls.
         if (
           !result.toolCall &&
-          (currentMode === 'onboarding' || currentMode === 'goal_review') &&
+          (currentMode === 'onboarding' || currentMode === 'goal_review' || currentMode === 'planning') &&
           looksLikeFakeToolNarration(result.content)
         ) {
+          const expectedTool = currentMode === 'planning' ? 'propose_workout' : 'propose_goals'
           if (fakeToolRetryRef.current < MAX_FAKE_TOOL_RETRIES) {
             fakeToolRetryRef.current += 1
             setToolCard({
               kind: 'error',
-              toolName: 'propose_goals',
+              toolName: expectedTool,
               message:
                 'Model narrated a tool call instead of emitting one. Press Send to retry with a strict tool-call request.',
             })
@@ -338,18 +808,24 @@ export default function Chat() {
             // Queue a strict follow-up prompt in the input instead of auto-retrying.
             // This keeps the UI responsive and avoids retry loops that feel frozen.
             setInput(
-              'Please emit an actual propose_goals tool call now. Do not describe the tool call in plain text.',
+              currentMode === 'planning'
+                ? 'Please emit an actual propose_workout tool call now. Do not describe the tool call in plain text.'
+                : 'Please emit an actual propose_goals tool call now. Do not describe the tool call in plain text.',
             )
             return
           }
 
           setToolCard({
             kind: 'error',
-            toolName: 'propose_goals',
+            toolName: expectedTool,
             message:
-              'Model did not emit a real tool call. Send a message asking it to call propose_goals.',
+              currentMode === 'planning'
+                ? 'Model did not emit a real tool call. Send a message asking it to call propose_workout.'
+                : 'Model did not emit a real tool call. Send a message asking it to call propose_goals.',
           })
+          return
         }
+
       },
 
       onError: (err: Error) => {
@@ -400,6 +876,7 @@ export default function Chat() {
     const newThread = [...messages, userMsg]
     setMessages(newThread)
     setInput('')
+    toolValidationRetryRef.current = 0
 
     const savedConv = await persistConv(newThread, conv, mode)
     await doStream(newThread, savedConv, mode, goals, model)
@@ -427,7 +904,12 @@ export default function Chat() {
       content: 'Goals accepted.',
       toolCallId: pendingTool.id,
     }
-    const newMessages = [...messages, toolResult]
+    const confirmMsg: Message = {
+      role: 'assistant',
+      content:
+        'Great — your goals are saved. I am now building your proposed first week of workouts.',
+    }
+    const newMessages = [...messages, toolResult, confirmMsg]
     setMessages(newMessages)
     setToolCard(null)
     setPendingTool(null)
@@ -437,8 +919,59 @@ export default function Chat() {
 
     const savedConv = await persistConv(newMessages, conv, nextMode)
     fakeToolRetryRef.current = 0
+    toolValidationRetryRef.current = 0
     // Continue — model acknowledges acceptance
     await doStream(newMessages, savedConv, nextMode, newGoals, model)
+  }
+
+  async function handleAcceptWorkouts(workouts: ProposeWorkoutsPayload) {
+    if (!pendingTool || toolActionBusy) return
+    const currentPending = pendingTool
+
+    setToolActionBusy(true)
+    setStreamError(null)
+    try {
+      const now = new Date().toISOString()
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+      for (const proposal of workouts) {
+        const workoutToSave = WorkoutSchema.parse({
+          ...proposal,
+          timezone,
+          generatedAt: now,
+        })
+        // Always-append policy for AI-proposed workouts (never overwrite existing records).
+        await saveWorkout(workoutToSave)
+      }
+
+      const toolResult: Message = {
+        role: 'tool',
+        content: `Workouts accepted and saved (${workouts.length}).`,
+        toolCallId: currentPending.id,
+      }
+      const confirmMsg: Message = {
+        role: 'assistant',
+        content:
+          `Saved ${workouts.length} workout${workouts.length === 1 ? '' : 's'} to your plan. ` +
+          'You can view them on the "Workouts" tab.',
+      }
+      const newMessages = [...messages, toolResult, confirmMsg]
+      setMessages(newMessages)
+      setToolCard(null)
+      setPendingTool(null)
+
+      const savedConv = await persistConv(newMessages, conv, mode)
+      fakeToolRetryRef.current = 0
+      toolValidationRetryRef.current = 0
+      // Stop here after accept. Auto-follow-up in planning can force another
+      // propose_workout turn and produce confusing retry prompts.
+      setConv(savedConv)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      setStreamError(`Failed to save accepted workouts: ${detail}`)
+    } finally {
+      setToolActionBusy(false)
+    }
   }
 
   async function handleRequestChanges(feedback: string) {
@@ -458,6 +991,7 @@ export default function Chat() {
 
     const savedConv = await persistConv(newMessages, conv, mode)
     fakeToolRetryRef.current = 0
+    toolValidationRetryRef.current = 0
     await doStream(newMessages, savedConv, mode, goals, model)
   }
 
@@ -472,7 +1006,9 @@ export default function Chat() {
     setToolCard(null)
     setPendingTool(null)
     setStreaming(false)
+    setToolActionBusy(false)
     fakeToolRetryRef.current = 0
+    toolValidationRetryRef.current = 0
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────────
@@ -484,7 +1020,11 @@ export default function Chat() {
         ? 'Discuss your goals…'
         : 'Ask your trainer…'
 
-  const inputDisabled = streaming || (pendingTool !== null && toolCard?.kind === 'goals')
+  const inputDisabled =
+    streaming ||
+    toolActionBusy ||
+    (pendingTool !== null &&
+      (toolCard?.kind === 'goals' || toolCard?.kind === 'workouts'))
 
   return (
     <div className="chat-screen">
@@ -545,6 +1085,17 @@ export default function Chat() {
             proposedText={toolCard.text}
             onAccept={() => handleAcceptGoals(toolCard.text)}
             onRequestChanges={handleRequestChanges}
+          />
+        </div>
+      )}
+
+      {toolCard?.kind === 'workouts' && (
+        <div className="chat-tool-panel">
+          <ProposeWorkoutCard
+            workouts={toolCard.workouts}
+            onAccept={() => handleAcceptWorkouts(toolCard.workouts)}
+            onRequestChanges={handleRequestChanges}
+            disabled={toolActionBusy}
           />
         </div>
       )}
