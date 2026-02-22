@@ -13,7 +13,7 @@ A Progressive Web App version of Track-Train-Live, designed for broader use beyo
 ## Core Architecture Decisions
 
 ### Auth & Billing — OpenRouter PKCE
-Users authenticate via OpenRouter's OAuth PKCE flow. After auth, the app holds a user-controlled API key that charges directly to the user's OpenRouter balance. The app never handles money, stores API keys, or manages billing. Users need an existing OpenRouter account.
+Users authenticate via OpenRouter's OAuth PKCE flow. After auth, the app receives a user-scoped API token that charges directly to the user's OpenRouter balance. The app never handles money, stores passwords, or manages billing — the token is stored locally on-device in IndexedDB and never transmitted anywhere except OpenRouter API calls. Users need an existing OpenRouter account.
 
 Reference: https://openrouter.ai/docs/guides/overview/auth/oauth
 
@@ -118,10 +118,46 @@ Each planning conversation is stored as a thread in IndexedDB (array of messages
 
 Planning is conversational and flexible. Two natural patterns emerge from the same interface:
 
-- **Weekly planning** — "Here's how last week went, what's the plan?" Agent reviews history, proposes a week of workouts via `propose_workout`.
+- **Weekly planning** — "Here's how last week went, what's the plan?" Agent reviews history, proposes a batch of workouts for the week via `propose_workout`.
 - **Day-of** — "What should I do today?" Agent checks recent history, proposes a single workout.
 
 Both use the same chat interface and the same tool. Users pay per token, so frequency is self-regulating — like deciding whether to call your trainer daily or weekly.
+
+### Planning Window
+
+The app always injects the next 7 days (D0–D6) into the system prompt so the model has concrete dates to plan against:
+
+```
+Today is Saturday, 2026-02-22 (D0). Planning window:
+D0 = 2026-02-22 (Sat)
+D1 = 2026-02-23 (Sun)
+...
+D6 = 2026-02-28 (Fri)
+```
+
+The model uses these exact date strings when proposing workouts. The app validates all proposed dates fall within the D0–D6 window before accepting.
+
+### `propose_workout` returns an array
+
+`propose_workout` always takes an array of workout objects — one item for day-of, multiple for weekly planning. Each item includes a date from the planning window.
+
+### Multiple workouts per day
+
+Multiple workouts can exist for the same day (e.g. morning strength + afternoon cardio, or a planned workout alongside an impromptu one). The Today screen handles this with a scrollable list or selector — UX to be determined.
+
+Workouts are stored with an auto-increment integer ID, not keyed by date. Date is an indexed field for lookups.
+
+### Always append
+
+AI proposals always create new workout records. Existing workouts are never implicitly deleted or replaced. If the user has a planned AM/PM pair and asks the AI to replan one of them, the result is a third record — the user then deletes the unwanted old plan explicitly.
+
+### Completion protection
+
+A workout is **completed** if any set or cardio option has a recorded `difficulty` value. Completed workouts are immutable — they cannot be overwritten or deleted by anything. This is an absolute rule.
+
+### Explicit delete
+
+Unstarted workouts (no difficulty values anywhere) can be deleted by the user via a delete control on the workout card in Today and History. The control disappears once any difficulty is recorded, making the workout permanent at that point.
 
 ---
 
@@ -134,7 +170,8 @@ Both use the same chat interface and the same tool. Users pay per token, so freq
 | History visualizations | Bulleted JSON view for v1; charts/graphs deferred. |
 | Onboarding conversation script | Not scripted — agent drives it freeform with `propose_goals` as the exit condition. |
 | Specific model identifiers | Not hardcoded. Premium = Sonnet-class, Affordable = capable tool-use Chinese model current on OpenRouter. |
+| Today screen multi-workout UX | Long scroll vs. selector — deferred to Phase 4. |
 
 ---
 
-*This document reflects design decisions made Feb 21, 2026. Implementation has not begun.*
+*This document reflects design decisions made Feb 21, 2026. Schema and data model decisions updated Feb 21, 2026.*
