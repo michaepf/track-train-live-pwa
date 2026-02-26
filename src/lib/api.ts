@@ -16,7 +16,7 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 export const MODELS = {
   premium: 'anthropic/claude-sonnet-4.6',
-  affordable: 'z-ai/glm-5',
+  affordable: 'z-ai/glm-5:nitro',
 } as const
 
 export type ModelTier = keyof typeof MODELS
