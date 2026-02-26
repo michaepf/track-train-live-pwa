@@ -170,7 +170,7 @@ const MAX_FAKE_TOOL_RETRIES = 2
 const MAX_TOOL_VALIDATION_RETRIES = 2
 const ONBOARDING_WELCOME_MESSAGE = `Welcome to Track Train Live! I'm your AI personal trainer.
 
-Here's how it works: we'll start with a short conversation about your goals and fitness background. From there, I'll build a personalised workout plan — you'll find it on the **Workouts** tab. Log each session there as you complete it, and I'll use that to track your progress and adjust the plan over time.
+Here's how it works: we'll start with a short conversation about your goals and fitness background. From there, I'll build a personalised workout plan — view upcoming sessions on the **Workouts** tab. On the day of a workout, use the **Today** tab to record how it went. Past sessions are saved to the **Log** tab. Come back here anytime to adjust your plan.
 
 To get started: what's your current experience with exercise or training? Are you just getting started, coming back after a break, or already training consistently?`
 
