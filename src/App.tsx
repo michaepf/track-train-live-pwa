@@ -72,9 +72,14 @@ function LoginScreen({ error }: { error: string | null }) {
       <div className="auth-card">
         <h1 className="auth-title">Track Train Live</h1>
         <p className="auth-subtitle">
-          Connect your OpenRouter account to get started. You'll use your own API
-          balance — the app never handles payment.
+          An AI-powered personal training app. Chat with your trainer to plan
+          workouts, then log your sessions as you go.
         </p>
+        <ul className="auth-features">
+          <li>All data is stored locally on your device — nothing leaves it except AI messages.</li>
+          <li>Requires a free <a href="https://openrouter.ai" target="_blank" rel="noreferrer">OpenRouter</a> account. You pay for AI usage directly — the app never handles money.</li>
+          <li>Estimated cost for heavy use: ~$1–2/month.</li>
+        </ul>
         {error && <p className="auth-error">{error}</p>}
         <button className="login-btn" onClick={handleLogin} disabled={starting}>
           {starting ? 'Redirecting…' : 'Connect with OpenRouter'}
@@ -99,9 +104,9 @@ function CallbackScreen() {
 type ScreenId = 'today' | 'workout' | 'chat' | 'history' | 'settings'
 
 const SCREENS: { id: ScreenId; label: string; icon: string }[] = [
+  { id: 'chat',     label: 'Chat',     icon: '💬' },
   { id: 'today',    label: 'Today',    icon: '📅' },
   { id: 'workout',  label: 'Workouts', icon: '💪' },
-  { id: 'chat',     label: 'Chat',     icon: '💬' },
   { id: 'history',  label: 'Log',      icon: '📋' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ]
@@ -114,7 +119,7 @@ export default function App() {
   const [authState, setAuthState] = useState<AuthState>('loading')
   const [apiKey, setApiKey] = useState<string>('')
   const [callbackError, setCallbackError] = useState<string | null>(null)
-  const [screen, setScreen] = useState<ScreenId>('today')
+  const [screen, setScreen] = useState<ScreenId>('chat')
   const [chatStreaming, setChatStreaming] = useState(false)
 
   useEffect(() => {
@@ -128,6 +133,7 @@ export default function App() {
           window.history.replaceState({}, '', window.location.pathname)
           const key = await getApiKey()
           setApiKey(key ?? '')
+          setScreen('chat')
           setAuthState('authenticated')
         })
         .catch((err: unknown) => {
