@@ -168,9 +168,11 @@ type ToolExecution =
 
 const MAX_FAKE_TOOL_RETRIES = 2
 const MAX_TOOL_VALIDATION_RETRIES = 2
-const ONBOARDING_WELCOME_MESSAGE = `Hey there! 👋 Welcome to Track Train Live — I'm your AI personal trainer, and I'm excited to help you get started on your fitness journey. Before we build a plan together, I'd love to get to know you a bit. Let's start simple:
+const ONBOARDING_WELCOME_MESSAGE = `Welcome to Track Train Live! I'm your AI personal trainer.
 
-What's your current experience with exercise or training? Are you just getting started, coming back after a break, or already pretty consistent with workouts?`
+Here's how it works: we'll start with a short conversation about your goals and fitness background. From there, I'll build a personalised workout plan — you'll find it on the **Workouts** tab. After each session, come back and tell me how it went, and I'll adjust the plan as we go.
+
+To get started: what's your current experience with exercise or training? Are you just getting started, coming back after a break, or already training consistently?`
 
 function looksLikeFakeToolNarration(text: string): boolean {
   const t = text.toLowerCase()
@@ -1012,7 +1014,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
     const confirmMsg: Message = {
       role: 'assistant',
       content:
-        'Great — your goals are saved. I am now building your proposed first week of workouts.',
+        'Great — your goals are saved. I\'m now building your first week of workouts. You can ask me anytime to adjust any part of your plan.',
     }
     const newMessages = [...messages, toolResult, confirmMsg]
     setMessages(newMessages)
@@ -1058,7 +1060,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
         role: 'assistant',
         content:
           `Saved ${workouts.length} workout${workouts.length === 1 ? '' : 's'} to your plan. ` +
-          'You can view them on the "Workouts" tab.',
+          'You can view them on the **Workouts** tab. Feel free to ask me anytime if you\'d like to make any changes.',
       }
       const newMessages = [...messages, toolResult, confirmMsg]
       setMessages(newMessages)
