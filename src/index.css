@@ -625,6 +625,17 @@ html, body {
   line-height: 1.45;
 }
 
+/* Disclaimer footer */
+.app-disclaimer {
+  text-align: center;
+  font-size: 0.7rem;
+  font-style: italic;
+  color: var(--text-muted);
+  padding: 6px 16px calc(6px + var(--safe-bottom));
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
 /* Bottom tab bar */
 .tab-bar {
   display: flex;

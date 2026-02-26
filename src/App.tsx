@@ -273,6 +273,7 @@ export default function App() {
               </button>
             ))}
           </nav>
+          <p className="app-disclaimer">Use at your own risk! Keep in mind that AI models can make mistakes.</p>
         </div>
         {showFirstTimeModal && <FirstTimeModal onDismiss={dismissFirstTimeModal} />}
       </ApiKeyContext.Provider>
