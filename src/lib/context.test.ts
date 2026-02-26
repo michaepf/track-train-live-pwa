@@ -6,6 +6,7 @@ import {
   needsGoalReview,
   buildHistoryContext,
   buildSystemPrompt,
+  generateWeeklySummary,
 } from './context.ts'
 import type { Goals, Workout } from './schemas/index.ts'
 
@@ -157,9 +158,9 @@ describe('buildHistoryContext', () => {
 
   it('includes recent workout details', () => {
     const ctx = buildHistoryContext([sampleWorkout], new Map())
-    expect(ctx).toContain('bench-press')
+    expect(ctx).toContain('bench-press') // exercise ID used directly
     expect(ctx).toContain(RECENT_DATE)
-    expect(ctx).toContain('completed')
+    expect(ctx).toContain('Done') // compact format: 'completed' → 'Done'
   })
 
   it('includes summary for older weeks', () => {
@@ -173,6 +174,43 @@ describe('buildHistoryContext', () => {
 
     const ctx = buildHistoryContext([sampleWorkout, oldWorkout], summaries)
     expect(ctx).toContain('Good week, hit all lifts')
+  })
+})
+
+// ─── generateWeeklySummary ────────────────────────────────────────────────────
+
+describe('generateWeeklySummary', () => {
+  it('produces a single line', () => {
+    const summary = generateWeeklySummary('2026-W08', [sampleWorkout])
+    expect(summary.split('\n')).toHaveLength(1)
+  })
+
+  it('includes the week key', () => {
+    const summary = generateWeeklySummary('2026-W08', [sampleWorkout])
+    expect(summary).toContain('2026-W08')
+  })
+
+  it('reports session count (singular)', () => {
+    const summary = generateWeeklySummary('2026-W08', [sampleWorkout])
+    expect(summary).toContain('1 session')
+    expect(summary).not.toContain('1 sessions')
+  })
+
+  it('reports session count (plural)', () => {
+    const w2: Workout = { ...sampleWorkout, id: 2, date: '2026-02-17' }
+    const summary = generateWeeklySummary('2026-W08', [sampleWorkout, w2])
+    expect(summary).toContain('2 sessions')
+  })
+
+  it('includes abbreviated difficulty signal', () => {
+    const summary = generateWeeklySummary('2026-W08', [sampleWorkout])
+    expect(summary).toContain('Done') // 'completed' → 'Done'
+  })
+
+  it('does not include weights or exercise names (trend only)', () => {
+    const summary = generateWeeklySummary('2026-W08', [sampleWorkout])
+    expect(summary).not.toContain('135') // no weight values
+    expect(summary).not.toContain('Bench Press') // no exercise names
   })
 })
 

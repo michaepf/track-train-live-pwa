@@ -9,6 +9,7 @@ import {
   getWeekKey,
   getPlanningWindow,
   getToday,
+  RECENT_HISTORY_DAYS,
 } from '../lib/context.ts'
 import { useApiKey } from '../App.tsx'
 import {
@@ -80,7 +81,7 @@ const PROPOSE_WORKOUT_TOOL = {
             workoutType: { type: 'string' },
             session: { type: 'string' },
             warmup: { type: 'object' },
-            entries: { type: 'array' },
+            entries: { type: 'array', description: 'Array of { exerciseId: string, sets: [{ plannedReps?: number, plannedWeight?: number, targetSeconds?: number }] }. Include multiple set objects per exercise (typically 3).' },
             cardioOptions: { type: 'array' },
             cardioMode: { type: 'string', enum: ['pick_one', 'pick_many'] },
             cooldown: { type: ['array', 'object'] },
@@ -665,7 +666,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
       // Load summaries for weeks older than 3 weeks (knownWorkouts is sorted desc)
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
       const cutoff = new Date()
-      cutoff.setDate(cutoff.getDate() - 21)
+      cutoff.setDate(cutoff.getDate() - RECENT_HISTORY_DAYS)
       const cutoffStr = cutoff.toLocaleDateString('en-CA', { timeZone: tz })
       const olderWeekKeys = [
         ...new Set(

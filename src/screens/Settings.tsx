@@ -6,8 +6,24 @@ import {
   clearGoals,
   clearCompletedWorkouts,
   clearPlannedWorkouts,
+  listWorkouts,
+  saveSummary,
+  getGoals,
+  getSummary,
+  saveWorkout,
+  clearWorkoutsOnly,
 } from '../lib/db.ts'
 import { logout } from '../lib/auth.ts'
+import {
+  getWeekKey,
+  generateWeeklySummary,
+  buildSystemPrompt,
+  buildHistoryContext,
+  buildUpcomingPlannedContext,
+  RECENT_HISTORY_DAYS,
+} from '../lib/context.ts'
+import { SCENARIOS, type ScenarioKey } from '../lib/dev-fixtures.ts'
+import type { Workout } from '../lib/schemas/index.ts'
 
 type ModelTier = 'premium' | 'affordable'
 type Scope = 'user' | 'both'
@@ -90,12 +106,45 @@ const DATA_ACTIONS: ActionDef[] = [
   },
 ]
 
+async function runSummaryPass(): Promise<string> {
+  const workouts = await listWorkouts(500)
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - RECENT_HISTORY_DAYS)
+  const cutoffStr = cutoff.toLocaleDateString('en-CA', { timeZone: tz })
+
+  const olderWorkouts = workouts.filter((w) => w.date < cutoffStr)
+  const byWeek = new Map<string, Workout[]>()
+  for (const w of olderWorkouts) {
+    const key = getWeekKey(w.date)
+    if (!byWeek.has(key)) byWeek.set(key, [])
+    byWeek.get(key)!.push(w)
+  }
+
+  for (const [weekKey, weekWorkouts] of byWeek) {
+    const summary = generateWeeklySummary(weekKey, weekWorkouts)
+    await saveSummary(weekKey, summary)
+  }
+
+  const n = byWeek.size
+  return n === 0
+    ? 'No older weeks found — nothing to summarize'
+    : `Summarized ${n} week${n === 1 ? '' : 's'}`
+}
+
 export default function Settings() {
   const [model, setModel] = useState<ModelTier>('affordable')
   const [saving, setSaving] = useState(false)
   const [armedAction, setArmedAction] = useState<string | null>(null)
   const [activeAction, setActiveAction] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [summaryStatus, setSummaryStatus] = useState<string | null>(null)
+  const [summaryBusy, setSummaryBusy] = useState(false)
+  const [promptText, setPromptText] = useState<string | null>(null)
+  const [promptBusy, setPromptBusy] = useState(false)
+  const [armedScenario, setArmedScenario] = useState<ScenarioKey | null>(null)
+  const [scenarioBusy, setScenarioBusy] = useState(false)
+  const [scenarioStatus, setScenarioStatus] = useState<string | null>(null)
 
   useEffect(() => {
     getSetting('model').then((stored) => {
@@ -135,6 +184,76 @@ export default function Settings() {
         err instanceof Error ? err.message : 'Something went wrong. Please try again.',
       )
       setActiveAction(null)
+    }
+  }
+
+  async function handleRunSummaryPass() {
+    setSummaryBusy(true)
+    setSummaryStatus(null)
+    try {
+      const result = await runSummaryPass()
+      setSummaryStatus(result)
+    } catch (err) {
+      setSummaryStatus(err instanceof Error ? err.message : 'Failed')
+    } finally {
+      setSummaryBusy(false)
+    }
+  }
+
+  async function handleInspectPrompt() {
+    setPromptBusy(true)
+    setPromptText(null)
+    try {
+      const workouts = await listWorkouts(100)
+      const goals = await getGoals()
+
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+      const cutoff = new Date()
+      cutoff.setDate(cutoff.getDate() - RECENT_HISTORY_DAYS)
+      const cutoffStr = cutoff.toLocaleDateString('en-CA', { timeZone: tz })
+
+      const olderWeekKeys = [
+        ...new Set(
+          workouts.filter((w) => w.date < cutoffStr).map((w) => getWeekKey(w.date)),
+        ),
+      ]
+      const summaryMap = new Map<string, string>()
+      for (const wk of olderWeekKeys) {
+        const summary = await getSummary(wk)
+        if (summary) summaryMap.set(wk, summary)
+      }
+
+      const historyContext = buildHistoryContext(workouts, summaryMap)
+      const upcomingContext = buildUpcomingPlannedContext(workouts)
+      const prompt = buildSystemPrompt(goals, 'planning', historyContext, upcomingContext)
+      setPromptText(prompt)
+    } catch (err) {
+      setPromptText(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } finally {
+      setPromptBusy(false)
+    }
+  }
+
+  async function confirmLoadScenario() {
+    if (!armedScenario) return
+    const scenario = SCENARIOS[armedScenario]
+    setArmedScenario(null)
+    setScenarioBusy(true)
+    setScenarioStatus(null)
+    setPromptText(null)
+    try {
+      await clearWorkoutsOnly()
+      for (const workout of scenario.workouts) {
+        await saveWorkout(workout)
+      }
+      const summaryResult = await runSummaryPass()
+      setScenarioStatus(
+        `Loaded "${scenario.label}" — ${scenario.workouts.length} sessions. ${summaryResult}.`,
+      )
+    } catch (err) {
+      setScenarioStatus(`Error: ${err instanceof Error ? err.message : 'Failed'}`)
+    } finally {
+      setScenarioBusy(false)
     }
   }
 
@@ -215,6 +334,106 @@ export default function Settings() {
         <div className="settings-label">Data</div>
         {DATA_ACTIONS.map(renderAction)}
         {actionError && <div className="settings-error">{actionError}</div>}
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-label">Developer</div>
+
+        {/* Run summary pass */}
+        <div className="settings-action">
+          <div className="settings-action-controls">
+            <button
+              className="logout-btn"
+              onClick={handleRunSummaryPass}
+              disabled={summaryBusy || busy || scenarioBusy}
+            >
+              {summaryBusy ? 'Running…' : 'Run summary pass'}
+            </button>
+          </div>
+          <div className="settings-action-side">
+            <span className="settings-action-desc">
+              Generates and saves weekly summaries for workout history older than 3 weeks.
+              {summaryStatus && <> — <strong>{summaryStatus}</strong></>}
+            </span>
+          </div>
+        </div>
+
+        {/* Inspect system prompt */}
+        <div className="settings-action">
+          <div className="settings-action-controls">
+            <button
+              className="logout-btn"
+              onClick={handleInspectPrompt}
+              disabled={promptBusy || busy || scenarioBusy}
+            >
+              {promptBusy ? 'Building…' : 'Inspect system prompt'}
+            </button>
+          </div>
+          <div className="settings-action-side">
+            <span className="settings-action-desc">
+              Builds the planning system prompt from current data and shows the full text with character count.
+            </span>
+          </div>
+        </div>
+        {promptText && (
+          <details className="dev-prompt-details">
+            <summary className="dev-prompt-summary">
+              {promptText.length.toLocaleString()} chars
+              {promptText.length < 6000 ? ' — bounded ✓' : ' — large ⚠'}
+            </summary>
+            <pre className="dev-prompt-preview">{promptText}</pre>
+          </details>
+        )}
+
+        {/* Load test scenario */}
+        <div className="settings-action">
+          <div className="settings-action-side">
+            <span className="settings-action-desc">
+              Load a fixture history to test agent behavior.{' '}
+              <strong>Replaces current workout data.</strong>
+              {scenarioStatus && <> — <strong>{scenarioStatus}</strong></>}
+            </span>
+          </div>
+        </div>
+        {(Object.keys(SCENARIOS) as ScenarioKey[]).map((key) => {
+          const s = SCENARIOS[key]
+          const isArmed = armedScenario === key
+          return (
+            <div key={key} className="settings-action">
+              <div className="settings-action-controls">
+                {isArmed ? (
+                  <div className="settings-confirm-row">
+                    <button
+                      className="settings-cancel-btn"
+                      onClick={() => setArmedScenario(null)}
+                      disabled={scenarioBusy}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="settings-confirm-btn"
+                      onClick={confirmLoadScenario}
+                      disabled={scenarioBusy}
+                    >
+                      {scenarioBusy ? 'Loading…' : 'Confirm load'}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="logout-btn"
+                    onClick={() => { setArmedScenario(key); setScenarioStatus(null) }}
+                    disabled={scenarioBusy || busy || !!armedScenario}
+                  >
+                    {scenarioBusy && armedScenario === key ? 'Loading…' : `Load: ${s.label}`}
+                  </button>
+                )}
+              </div>
+              <div className="settings-action-side">
+                <span className="settings-action-desc">{s.description}</span>
+              </div>
+            </div>
+          )
+        })}
       </section>
     </div>
   )

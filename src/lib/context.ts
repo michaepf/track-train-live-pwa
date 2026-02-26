@@ -13,7 +13,7 @@ import {
   type Goals,
   type Workout,
 } from './schemas/index.ts'
-import { getExerciseName, buildCatalogPromptSection } from '../data/exercises.ts'
+import { buildCatalogPromptSection } from '../data/exercises.ts'
 
 // ─── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -103,63 +103,119 @@ export function needsGoalReview(goals: Goals): boolean {
 
 // ─── Workout formatting ────────────────────────────────────────────────────────
 
-function formatSet(set: {
+const DIFF_SHORT: Record<string, string> = {
+  could_not_complete: 'Fail',
+  completed: 'Done',
+  too_easy: 'Easy',
+}
+
+function formatSetCompact(set: {
   plannedReps?: number
   targetSeconds?: number
   plannedWeight?: number
-  difficulty?: string
 }): string {
-  const parts: string[] = []
-  if (set.plannedReps) parts.push(`${set.plannedReps} reps`)
-  if (set.targetSeconds) parts.push(`${set.targetSeconds}s hold`)
-  if (set.plannedWeight) parts.push(`@ ${set.plannedWeight}lb`)
-  if (set.difficulty) parts.push(`[${set.difficulty}]`)
-  return parts.join(' ') || 'set'
+  if (set.targetSeconds) return `${set.targetSeconds}s`
+  const reps = set.plannedReps ?? '?'
+  const weight = set.plannedWeight != null ? `x${set.plannedWeight}` : ''
+  return `${reps}${weight}`
 }
 
-function formatWorkout(workout: Workout): string {
-  const lines: string[] = [
-    `Date: ${workout.date}`,
-    `Type: ${workout.workoutType ?? 'unknown'}`,
-  ]
+/**
+ * Compact session format used for recent workouts in the planning context.
+ *
+ * Example:
+ *   2026-02-18 Push A
+ *     db-bench-press | 8x50 8x50 8x50 | Easy Easy Easy
+ *     cable-row | 10x65 10x65 10x65 | Done Done Done | "felt good"
+ */
+function formatWorkoutCompact(workout: Workout): string {
+  const label = workout.session ?? workout.workoutType ?? 'workout'
+  const lines: string[] = [`${workout.date} ${label}`]
 
-  if (workout.entries && workout.entries.length > 0) {
-    lines.push('Exercises:')
-    for (const entry of workout.entries) {
-      const setStrs = entry.sets.map(formatSet).join(', ')
-      lines.push(`  ${getExerciseName(entry.exerciseId)}: ${setStrs}`)
-      if (entry.notes) {
-        lines.push(`    note: ${entry.notes}`)
-      }
-    }
+  for (const entry of workout.entries ?? []) {
+    const name = entry.exerciseId
+    const sets = entry.sets.map(formatSetCompact).join(' ')
+    const diffs = entry.sets
+      .map((s) => (s.difficulty ? (DIFF_SHORT[s.difficulty] ?? s.difficulty) : '—'))
+      .join(' ')
+    const note = entry.notes ? ` | "${entry.notes}"` : ''
+    lines.push(`  ${name} | ${sets} | ${diffs}${note}`)
   }
 
-  if (workout.cardioOptions && workout.cardioOptions.length > 0) {
-    lines.push('Cardio:')
-    for (const opt of workout.cardioOptions) {
-      const diff = opt.difficulty ? ` [${opt.difficulty}]` : ''
-      lines.push(`  ${opt.label}${diff}`)
-    }
+  for (const opt of workout.cardioOptions ?? []) {
+    const diff = opt.difficulty ? ` [${DIFF_SHORT[opt.difficulty] ?? opt.difficulty}]` : ''
+    lines.push(`  Cardio: ${opt.label}${diff}`)
   }
 
   const latestUserFeedback = [...(workout.feedback ?? [])]
     .reverse()
     .find((f) => f.source === 'user')?.note
   if (latestUserFeedback) {
-    lines.push(`User note: ${latestUserFeedback}`)
+    lines.push(`  note: "${latestUserFeedback}"`)
   }
 
   return lines.join('\n')
 }
 
+// ─── Weekly summary generator ──────────────────────────────────────────────────
+
+/**
+ * Returns the dominant difficulty across a set of sets: whichever of
+ * Easy / Fail / Done appears most. Ties break toward the more informative
+ * signal (Fail beats Done, Easy beats Done).
+ */
+function dominantDiff(sets: { difficulty?: string }[]): string {
+  let easy = 0, done = 0, fail = 0
+  for (const s of sets) {
+    if (s.difficulty === 'too_easy') easy++
+    else if (s.difficulty === 'could_not_complete') fail++
+    else if (s.difficulty === 'completed') done++
+  }
+  if (easy === 0 && done === 0 && fail === 0) return '—'
+  if (easy >= fail && easy >= done) return 'Easy'
+  if (fail >= easy && fail >= done) return 'Fail'
+  return 'Done'
+}
+
+/**
+ * Generates a ONE-LINE trend summary of a week's workouts for injection into
+ * the planning context for weeks older than the 3-week full-detail window.
+ *
+ * Weights are omitted — the AI gets precise weight data from the recent section.
+ * This line only provides the trend signal (Easy/Done/Fail per session type).
+ *
+ * Example:
+ *   2026-W05 (3 sessions): Push A: Easy/Easy/Easy, Pull A: Done/Easy/Done, Legs A: Fail/Fail/Done
+ */
+export function generateWeeklySummary(weekKey: string, workouts: Workout[]): string {
+  const sorted = [...workouts].sort((a, b) => a.date.localeCompare(b.date))
+  const n = sorted.length
+
+  const sessionParts = sorted.map((w) => {
+    const label = w.session ?? w.workoutType ?? 'workout'
+    const exDiffs = (w.entries ?? []).map((e) => dominantDiff(e.sets)).join('/')
+    const cardioDiffs = (w.cardioOptions ?? [])
+      .filter((o) => o.difficulty)
+      .map((o) => DIFF_SHORT[o.difficulty!] ?? o.difficulty!)
+      .join('/')
+    const diffs = [exDiffs, cardioDiffs].filter(Boolean).join('/')
+    return diffs ? `${label}: ${diffs}` : label
+  })
+
+  return `${weekKey} (${n} session${n === 1 ? '' : 's'}): ${sessionParts.join(', ')}`
+}
+
 // ─── History context builder ───────────────────────────────────────────────────
+
+/** Days of full-detail history before falling back to weekly summaries. */
+export const RECENT_HISTORY_DAYS = 42
 
 /**
  * Builds the history section for the system prompt.
  *
  * Strategy:
- * - Last 3 weeks: full workout detail
- * - Older weeks: summary text (if available in summaries map)
+ * - Last 6 weeks: compact per-session detail including weights and per-set difficulty
+ * - Older weeks: one line per week from stored summaries (trend signal only, no weights)
  *
  * Workouts should be passed sorted most-recent-first (as returned by listWorkouts).
  */
@@ -171,7 +227,7 @@ export function buildHistoryContext(
 
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
   const cutoff = new Date()
-  cutoff.setDate(cutoff.getDate() - 21)
+  cutoff.setDate(cutoff.getDate() - RECENT_HISTORY_DAYS)
   const cutoffStr = cutoff.toLocaleDateString('en-CA', { timeZone: tz })
 
   const recentWorkouts = workouts.filter((w) => w.date >= cutoffStr)
@@ -179,21 +235,22 @@ export function buildHistoryContext(
 
   const parts: string[] = []
 
-  // Older weeks: use summaries if available
-  const olderWeeks = new Set(olderWorkouts.map((w) => getWeekKey(w.date)))
-  for (const [weekKey, summary] of summaries) {
-    if (olderWeeks.has(weekKey)) {
-      parts.push(`Week ${weekKey} summary:\n${summary}`)
-    }
+  // Recent workouts: compact detail, most-recent-first
+  if (recentWorkouts.length > 0) {
+    const recentLines = recentWorkouts.map(formatWorkoutCompact)
+    parts.push('Recent workouts (last 3 weeks):\n' + recentLines.join('\n'))
   }
 
-  // Recent workouts: full detail (oldest first for readability)
-  if (recentWorkouts.length > 0) {
-    parts.push('Recent workouts (last 3 weeks):')
-    for (const workout of [...recentWorkouts].reverse()) {
-      parts.push(formatWorkout(workout))
-      parts.push('---')
+  // Older weeks: one summary line per week (trend signal only), most-recent-first
+  const olderWeekKeys = new Set(olderWorkouts.map((w) => getWeekKey(w.date)))
+  const olderLines: string[] = []
+  for (const [weekKey, summary] of summaries) {
+    if (olderWeekKeys.has(weekKey)) {
+      olderLines.push(summary)
     }
+  }
+  if (olderLines.length > 0) {
+    parts.push('Older training history:\n' + olderLines.join('\n'))
   }
 
   return parts.join('\n\n')
@@ -254,7 +311,7 @@ const TOOL_INSTRUCTIONS: Record<ConvMode, string> = {
 
   planning: `Use \`propose_workout\` only when proposing or modifying the workout schedule. For general questions, answer directly without calling any tool.
 
-When proposing: call \`propose_workout\` with an array of 1–7 workout objects, each using a date from the D0–D6 planning window. Review "Existing Workouts in Planning Window" before proposing — append around existing sessions; do not duplicate them.
+When proposing: call \`propose_workout\` with an array of 1–7 workout objects, each using a date from the D0–D6 planning window. Review "Existing Workouts in Planning Window" before proposing — append around existing sessions; do not duplicate them. Each strength exercise entry must include multiple set objects in the \`sets\` array (typically 3 sets), each with \`plannedReps\` and \`plannedWeight\` in lb. Always include a weight — use the most recent result from history, or a conservative beginner estimate if no history exists. Omit \`plannedWeight\` only for bodyweight-only or timed-hold exercises (e.g. plank, dead bug).
 
 Do not output markdown tables or D-label shorthand in user-visible text.`,
 }

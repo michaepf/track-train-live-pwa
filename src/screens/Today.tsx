@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { getWorkoutsByDate, saveWorkout } from '../lib/db.ts'
+import { getWorkoutsByDate, saveWorkout, deleteWorkout } from '../lib/db.ts'
 import { getToday } from '../lib/context.ts'
-import { getExerciseName } from '../data/exercises.ts'
+import ExerciseTip from '../components/ExerciseTip.tsx'
 import {
   getWorkoutStatus,
+  isWorkoutCompleted,
   type Difficulty,
   type Workout,
 } from '../lib/schemas/index.ts'
@@ -18,6 +19,12 @@ function formatDateLabel(date: string): string {
     day: 'numeric',
     year: 'numeric',
   })
+}
+
+function addDays(date: string, n: number): string {
+  const d = new Date(`${date}T12:00:00`)
+  d.setDate(d.getDate() + n)
+  return d.toLocaleDateString('en-CA')
 }
 
 
@@ -40,7 +47,8 @@ function nextDifficulty(current: Difficulty | undefined, desired: Difficulty): D
 }
 
 export default function Today() {
-  const [today] = useState(getToday())
+  const actualToday = getToday()
+  const [viewDate, setViewDate] = useState(actualToday)
   const [workouts, setWorkouts] = useState<Workout[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -53,7 +61,7 @@ export default function Today() {
     setError(null)
     setLoading(true)
     try {
-      const rows = await getWorkoutsByDate(today)
+      const rows = await getWorkoutsByDate(viewDate)
       setWorkouts(rows)
       const drafts: Record<number, string> = {}
       const entryDrafts: Record<string, string> = {}
@@ -142,7 +150,7 @@ export default function Today() {
   useEffect(() => {
     loadToday()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [today])
+  }, [viewDate])
 
   useEffect(() => {
     return () => {
@@ -213,6 +221,65 @@ export default function Today() {
     void persistWorkout(updated)
   }
 
+  function toggleWarmupItem(
+    workoutId: number,
+    section: 'cardio' | 'cardioOptions' | 'mobility',
+    idx: number,
+    done: boolean,
+  ) {
+    const workout = workouts.find((w) => w.id === workoutId)
+    if (!workout?.warmup) return
+
+    const warmup = { ...workout.warmup }
+    if (section === 'cardio' && Array.isArray(warmup.cardio)) {
+      const items = [...warmup.cardio]
+      items[idx] = { ...items[idx], done }
+      warmup.cardio = items
+    } else if (section === 'cardioOptions' && warmup.cardioOptions) {
+      const items = [...warmup.cardioOptions]
+      items[idx] = { ...items[idx], done }
+      warmup.cardioOptions = items
+    } else if (section === 'mobility' && warmup.mobility) {
+      const items = [...warmup.mobility]
+      items[idx] = { ...items[idx], done }
+      warmup.mobility = items
+    }
+
+    const updated: Workout = { ...workout, warmup }
+    setWorkouts((prev) => prev.map((w) => (w.id === workoutId ? updated : w)))
+    void persistWorkout(updated)
+  }
+
+  function toggleCooldownItem(workoutId: number, idx: number, done: boolean) {
+    const workout = workouts.find((w) => w.id === workoutId)
+    if (!workout?.cooldown) return
+
+    let cooldown: Workout['cooldown']
+    if (Array.isArray(workout.cooldown)) {
+      const items = [...workout.cooldown]
+      items[idx] = { ...items[idx], done }
+      cooldown = items
+    } else {
+      const stretching = [...(workout.cooldown.stretching ?? [])]
+      stretching[idx] = { ...stretching[idx], done }
+      cooldown = { ...workout.cooldown, stretching }
+    }
+
+    const updated: Workout = { ...workout, cooldown }
+    setWorkouts((prev) => prev.map((w) => (w.id === workoutId ? updated : w)))
+    void persistWorkout(updated)
+  }
+
+  async function handleDeleteWorkout(workoutId: number) {
+    if (!window.confirm('Delete this workout? This cannot be undone.')) return
+    try {
+      await deleteWorkout(workoutId)
+      setWorkouts((prev) => prev.filter((w) => w.id !== workoutId))
+    } catch {
+      alert('Could not delete workout.')
+    }
+  }
+
   return (
     <div className="screen-content">
       <div className="today-header">
@@ -221,13 +288,22 @@ export default function Today() {
           {loading ? 'Loading...' : 'Refresh'}
         </button>
       </div>
-      <div className="today-date">{formatDateLabel(today)}</div>
+      <div className="today-date-nav">
+        <button className="today-nav-btn" onClick={() => setViewDate((d) => addDays(d, -1))}>‹</button>
+        <span className="today-date">{formatDateLabel(viewDate)}</span>
+        <button className="today-nav-btn" onClick={() => setViewDate((d) => addDays(d, 1))}>›</button>
+        {viewDate !== actualToday && (
+          <button className="today-today-btn" onClick={() => setViewDate(actualToday)}>Today</button>
+        )}
+      </div>
 
       {error && <p className="goals-error">{error}</p>}
 
       {!loading && workouts.length === 0 && (
         <p className="placeholder-text">
-          No workouts planned for today. Ask Chat for a day-of workout or weekly plan.
+          {viewDate === actualToday
+            ? 'No workouts planned for today. Ask Chat for a day-of workout or weekly plan.'
+            : 'No workouts planned for this day.'}
         </p>
       )}
 
@@ -240,23 +316,112 @@ export default function Today() {
             <section className="today-workout" key={workout.id ?? `${workout.date}-${workout.session}`}>
               <div className="today-workout-header">
                 <div className="today-workout-title">{workout.session ?? workout.workoutType}</div>
-                <span
-                  className={`today-save-indicator today-save-indicator--${saveState}`}
-                  title={
-                    saveState === 'saving'
-                      ? 'Saving...'
-                      : saveState === 'saved'
-                        ? 'Saved'
-                        : saveState === 'error'
-                          ? 'Save failed'
-                          : 'Idle'
-                  }
-                />
+                <div className="today-workout-header-right">
+                  {workout.id && !isWorkoutCompleted(workout) && (
+                    <button
+                      className="today-delete-btn"
+                      onClick={() => handleDeleteWorkout(workout.id as number)}
+                      title="Delete this workout"
+                    >
+                      Delete
+                    </button>
+                  )}
+                  <span
+                    className={`today-save-indicator today-save-indicator--${saveState}`}
+                    title={
+                      saveState === 'saving'
+                        ? 'Saving...'
+                        : saveState === 'saved'
+                          ? 'Saved'
+                          : saveState === 'error'
+                            ? 'Save failed'
+                            : 'Idle'
+                    }
+                  />
+                </div>
               </div>
+
+              {workout.warmup && (() => {
+                const w = workout.warmup
+                const cardioItems = Array.isArray(w.cardio) ? w.cardio : null
+                const cardioOptions = w.cardioOptions ?? []
+                const mobility = w.mobility ?? []
+                const hasWarmup = cardioItems?.length || cardioOptions.length || mobility.length
+                if (!hasWarmup) return null
+                return (
+                  <div className="today-phase-section">
+                    <div className="today-phase-label">Warm-up</div>
+                    {cardioItems && cardioItems.length > 0 && (
+                      <div className="today-checklist">
+                        {cardioItems.map((item, i) => (
+                          <label key={i} className="today-checklist-item">
+                            <input
+                              type="checkbox"
+                              checked={item.done ?? false}
+                              onChange={(e) =>
+                                workout.id && toggleWarmupItem(workout.id, 'cardio', i, e.target.checked)
+                              }
+                            />
+                            <span className={item.done ? 'today-checklist-done' : ''}>
+                              {item.name ?? item.exercise ?? 'Item'}
+                              {(item.reps || item.duration) && (
+                                <span className="today-checklist-detail"> — {item.reps ?? item.duration}</span>
+                              )}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {cardioOptions.length > 0 && (
+                      <div className="today-checklist">
+                        {cardioOptions.map((item, i) => (
+                          <label key={i} className="today-checklist-item">
+                            <input
+                              type="checkbox"
+                              checked={item.done ?? false}
+                              onChange={(e) =>
+                                workout.id && toggleWarmupItem(workout.id, 'cardioOptions', i, e.target.checked)
+                              }
+                            />
+                            <span className={item.done ? 'today-checklist-done' : ''}>
+                              {item.name ?? item.exercise ?? 'Item'}
+                              {(item.reps || item.duration) && (
+                                <span className="today-checklist-detail"> — {item.reps ?? item.duration}</span>
+                              )}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {mobility.length > 0 && (
+                      <div className="today-checklist">
+                        <div className="today-checklist-title">Mobility</div>
+                        {mobility.map((item, i) => (
+                          <label key={i} className="today-checklist-item">
+                            <input
+                              type="checkbox"
+                              checked={item.done ?? false}
+                              onChange={(e) =>
+                                workout.id && toggleWarmupItem(workout.id, 'mobility', i, e.target.checked)
+                              }
+                            />
+                            <span className={item.done ? 'today-checklist-done' : ''}>
+                              {item.name ?? item.exercise ?? 'Item'}
+                              {(item.reps || item.duration) && (
+                                <span className="today-checklist-detail"> — {item.reps ?? item.duration}</span>
+                              )}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               {(workout.entries ?? []).map((entry, entryIdx) => (
                 <div key={`${entry.exerciseId}-${entryIdx}`} className="today-entry">
-                  <div className="today-entry-name">{getExerciseName(entry.exerciseId)}</div>
+                  <div className="today-entry-name"><ExerciseTip exerciseId={entry.exerciseId} /></div>
                   {entry.sets.map((set, setIdx) => (
                     <div key={`${entry.exerciseId}-${setIdx}`} className="today-set-row">
                       <span className="today-set-label">
@@ -356,6 +521,40 @@ export default function Today() {
                   ))}
                 </div>
               )}
+
+              {workout.cooldown && (() => {
+                const cd = workout.cooldown
+                const stretches = Array.isArray(cd) ? cd : (cd.stretching ?? [])
+                const notes = Array.isArray(cd) ? undefined : cd.notes
+                if (!stretches.length && !notes) return null
+                return (
+                  <div className="today-phase-section">
+                    <div className="today-phase-label">Cool-down</div>
+                    {stretches.length > 0 && (
+                      <div className="today-checklist">
+                        {stretches.map((item, i) => (
+                          <label key={i} className="today-checklist-item">
+                            <input
+                              type="checkbox"
+                              checked={item.done ?? false}
+                              onChange={(e) =>
+                                workout.id && toggleCooldownItem(workout.id, i, e.target.checked)
+                              }
+                            />
+                            <span className={item.done ? 'today-checklist-done' : ''}>
+                              {item.name ?? item.exercise ?? 'Item'}
+                              {(item.reps || item.duration) && (
+                                <span className="today-checklist-detail"> — {item.reps ?? item.duration}</span>
+                              )}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {notes && <p className="today-phase-notes">{notes}</p>}
+                  </div>
+                )
+              })()}
 
               <div className="today-note-block">
                 <label className="today-note-label">Workout notes for your coach</label>

@@ -85,6 +85,111 @@ html, body {
   cursor: default;
 }
 
+.workouts-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workouts-expand-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.workout-card-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.workout-card-toggle-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workout-card-chevron {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  padding-left: 8px;
+}
+
+.workout-card-detail {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workout-card-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workout-card-entry-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.workout-card-entry-sets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.workout-card-set-chip {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+
+.workout-card-entry-notes {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.workout-card-delete-row {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.workout-card-delete-btn {
+  background: none;
+  border: 1px solid #7a2a2a;
+  border-radius: 7px;
+  color: #e88;
+  font-size: 0.8rem;
+  padding: 5px 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.workout-card-delete-btn:active {
+  background: #3a1a1a;
+}
+
 .workouts-list {
   display: flex;
   flex-direction: column;
@@ -101,10 +206,47 @@ html, body {
   margin-bottom: 4px;
 }
 
+.today-date-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
 .today-date {
   font-size: 0.85rem;
   color: var(--text-muted);
-  margin-bottom: 12px;
+}
+
+.today-nav-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 2px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.today-nav-btn:active {
+  background: var(--bg-raised);
+}
+
+.today-today-btn {
+  background: none;
+  border: 1px solid var(--accent-dim);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .today-list {
@@ -311,6 +453,138 @@ html, body {
 
 @keyframes today-spin {
   to { transform: rotate(360deg); }
+}
+
+.today-workout-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.today-delete-btn {
+  background: none;
+  border: 1px solid #7a2a2a;
+  border-radius: 7px;
+  color: #e88;
+  font-size: 0.76rem;
+  padding: 3px 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.today-delete-btn:active {
+  background: #3a1a1a;
+}
+
+.today-phase-section {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.today-phase-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.today-phase-notes {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.today-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.today-checklist-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.today-checklist-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.today-checklist-item input[type="checkbox"] {
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+}
+
+.today-checklist-done {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.today-checklist-detail {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* ─── History screen ─────────────────────────────────────────────────────── */
+
+.history-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.history-card-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.history-status-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.history-status-badge--completed {
+  color: #b7f5c3;
+  border-color: #2d7a44;
+  background: #1d3a27;
+}
+
+.history-delete-btn {
+  background: none;
+  border: 1px solid #7a2a2a;
+  border-radius: 7px;
+  color: #e88;
+  font-size: 0.72rem;
+  padding: 2px 7px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .workouts-day {
@@ -604,6 +878,33 @@ html, body {
   margin-top: 8px;
   font-size: 0.85rem;
   color: #e88;
+}
+
+.dev-prompt-details {
+  margin: 8px 0 4px;
+}
+
+.dev-prompt-summary {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 0;
+}
+
+.dev-prompt-preview {
+  margin-top: 8px;
+  padding: 10px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+  color: var(--text-muted);
 }
 
 /* ─── Goals screen ─────────────────────────────────────────────────────────── */
@@ -980,6 +1281,37 @@ html, body {
   font-size: 0.86rem;
 }
 
+.tool-card-workout-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tool-card-workout-toggle-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-card-workout-chevron {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-left: 10px;
+  flex-shrink: 0;
+}
+
+.tool-card-workout-detail {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
 .tool-card-feedback {
   width: 100%;
   background: var(--bg);
@@ -1027,4 +1359,57 @@ html, body {
 .tool-card-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* ─── Exercise tooltip ─────────────────────────────────────────────────────── */
+
+.exercise-tip-trigger {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.exercise-tip-icon {
+  font-size: 0.72em;
+  color: var(--text-muted);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.exercise-tip-panel {
+  margin-top: 5px;
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.exercise-tip-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.exercise-tip-tag {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }

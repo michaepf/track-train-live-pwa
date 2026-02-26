@@ -209,7 +209,7 @@ export function getExerciseName(id: string): string {
  * One line per exercise: "  id — Name"
  */
 export function buildCatalogPromptSection(): string {
-  const lines = EXERCISES.map((e) => `  ${e.id} — ${e.name}`)
+  const lines = EXERCISES.map((e) => `  ${e.id}`)
   return [
     '## Exercise Catalog',
     '',

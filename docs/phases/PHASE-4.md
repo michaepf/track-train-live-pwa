@@ -21,7 +21,7 @@ Port the existing workout execution experience to React + IndexedDB.
 - [x] No-workout empty state with navigation hint
 - [x] Multi-session same-day UX (selector/list)
 - [x] Save workflow via `saveWorkout(workout)` (autosave interaction model)
-- [ ] Delete button for unstarted workouts only (`deleteWorkout(id)`)
+- [x] Delete button for unstarted workouts only (`deleteWorkout(id)`)
 - [x] Add explicit "Complete workout" action
 
 ## 4b - Port Existing Interaction Logic
@@ -29,7 +29,7 @@ Port the existing workout execution experience to React + IndexedDB.
 - [x] Exercise cards and set rows
 - [x] FAIL/DONE/EASY buttons with toggle-off behavior
 - [x] Cardio options and `pick_one` / `pick_many` behavior
-- [ ] Warmup/cooldown checklist interactions
+- [x] Warmup/cooldown checklist interactions
 - [x] Notes text areas (per-exercise + per-workout, autosave)
 - [ ] AI tips tooltip behavior
 - [x] Save state indicator transitions (saving/saved/error)
@@ -58,7 +58,5 @@ Port the existing workout execution experience to React + IndexedDB.
 
 ## Remaining Gaps (Current)
 
-- Warmup/cooldown checklist completion interactions
-- Delete affordance for unstarted workouts from `Today`
 - Optional AI tips/tooltip parity with original app
 
