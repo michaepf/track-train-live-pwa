@@ -714,9 +714,12 @@ export default function Chat({ onStreamingChange }: ChatProps) {
           fakeToolRetryRef.current = 0
         }
 
-        const assistantMsg: Message = result.toolCall
-          ? { role: 'assistant', content: result.content, toolCall: result.toolCall }
-          : { role: 'assistant', content: result.content }
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content: result.content,
+          ...(result.toolCall ? { toolCall: result.toolCall } : {}),
+          ...(result.thinkingBlocks?.length ? { thinkingBlocks: result.thinkingBlocks } : {}),
+        }
 
         // Build the final thread in one pass before persisting
         let finalMessages: Message[] = [...thread, assistantMsg]

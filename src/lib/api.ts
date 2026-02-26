@@ -8,7 +8,7 @@
  */
 
 import { handle401 } from './auth.ts'
-import type { Message } from './schemas/index.ts'
+import type { Message, ThinkingBlock } from './schemas/index.ts'
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
@@ -37,6 +37,8 @@ export interface StreamResult {
     name: string
     arguments: string // raw JSON string
   }
+  /** Thinking blocks returned by Anthropic extended thinking. Stored for replay. */
+  thinkingBlocks?: ThinkingBlock[]
 }
 
 export interface StreamChatOpts {
@@ -61,9 +63,16 @@ type SystemContentPart = {
   cache_control: { type: 'ephemeral' }
 }
 
+// Content block types used when extended thinking is enabled (Anthropic format).
+type ThinkingContentBlock = { type: 'thinking'; thinking: string; signature: string }
+type TextContentBlock = { type: 'text'; text: string }
+type ToolUseContentBlock = { type: 'tool_use'; id: string; name: string; input: unknown }
+type AssistantContentBlock = ThinkingContentBlock | TextContentBlock | ToolUseContentBlock
+
 type ApiMessage =
   | { role: 'system'; content: SystemContentPart[] }
   | { role: 'user' | 'assistant'; content: string }
+  | { role: 'assistant'; content: AssistantContentBlock[] }
   | {
       role: 'assistant'
       content: string | null
@@ -75,6 +84,9 @@ type ApiMessage =
  * Convert our internal Message format to the OpenRouter/OpenAI wire format.
  * Wraps the system prompt in a content-part array with cache_control for
  * prompt caching on supported models.
+ *
+ * When a message has thinkingBlocks, uses the Anthropic content-array format
+ * so thinking blocks are replayed verbatim (required by Anthropic's API).
  */
 function buildApiMessages(systemPrompt: string, messages: Message[]): ApiMessage[] {
   const system: ApiMessage = {
@@ -95,6 +107,28 @@ function buildApiMessages(systemPrompt: string, messages: Message[]): ApiMessage
         tool_call_id: msg.toolCallId ?? '',
         content: msg.content,
       }
+    }
+
+    // If the message has thinking blocks, use Anthropic content-array format.
+    // Thinking blocks must be replayed verbatim (with signature) for the API to accept them.
+    if (msg.role === 'assistant' && msg.thinkingBlocks && msg.thinkingBlocks.length > 0) {
+      const blocks: AssistantContentBlock[] = msg.thinkingBlocks.map((tb) => ({
+        type: 'thinking' as const,
+        thinking: tb.thinking,
+        signature: tb.signature,
+      }))
+
+      if (msg.toolCall) {
+        let safeInput: unknown = {}
+        try {
+          safeInput = JSON.parse(msg.toolCall.arguments)
+        } catch { /* leave as empty object */ }
+        blocks.push({ type: 'tool_use', id: msg.toolCall.id, name: msg.toolCall.name, input: safeInput })
+      } else {
+        blocks.push({ type: 'text', text: msg.content })
+      }
+
+      return { role: 'assistant', content: blocks }
     }
 
     if (msg.role === 'assistant' && msg.toolCall) {
@@ -126,6 +160,11 @@ function buildApiMessages(systemPrompt: string, messages: Message[]): ApiMessage
   })
 
   return [system, ...converted]
+}
+
+/** Returns true if the model supports extended thinking (Anthropic models only). */
+function isAnthropicModel(model: string): boolean {
+  return model.startsWith('anthropic/')
 }
 
 // ─── Streaming client ──────────────────────────────────────────────────────────
@@ -172,6 +211,12 @@ export async function streamChat(opts: StreamChatOpts): Promise<void> {
     model,
     stream: DEBUG_NON_STREAM ? false : true,
     messages: buildApiMessages(systemPrompt, messages),
+  }
+
+  // Enable extended thinking for Anthropic models.
+  // budget_tokens caps thinking token usage per response; the model uses less if the task is simple.
+  if (isAnthropicModel(model)) {
+    body.thinking = { type: 'enabled', budget_tokens: 8000 }
   }
 
   if (tools && tools.length > 0) {
@@ -223,26 +268,59 @@ export async function streamChat(opts: StreamChatOpts): Promise<void> {
       const json = await debugResponse.json()
       console.log('[api] non-stream raw response:', JSON.stringify(json, null, 2))
 
-      // OpenAI-compatible non-stream response shape
-      const message = (json as { choices?: { message?: { content?: string | null; tool_calls?: unknown[] } }[] }).choices?.[0]?.message
-      const content = message?.content ?? ''
-      const rawToolCall = message?.tool_calls?.[0] as
-        | { id?: string; function?: { name?: string; arguments?: string } }
-        | undefined
+      // OpenAI-compatible non-stream response shape.
+      // When extended thinking is enabled, message.content is a content-block array
+      // rather than a plain string.
+      type RawContentBlock = {
+        type: string
+        text?: string
+        thinking?: string
+        signature?: string
+        id?: string
+        name?: string
+        input?: unknown
+      }
+      type RawMessage = {
+        content?: string | RawContentBlock[] | null
+        tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[]
+      }
+      const message = (json as { choices?: { message?: RawMessage }[] }).choices?.[0]?.message
 
-      console.log('[api] non-stream tool_call found:', !!rawToolCall, rawToolCall?.function?.name ?? '(none)')
+      let textContent = ''
+      const thinkingBlocks: ThinkingBlock[] = []
+      let embeddedToolCall: { id: string; name: string; arguments: string } | undefined
+
+      if (Array.isArray(message?.content)) {
+        for (const block of message.content as RawContentBlock[]) {
+          if (block.type === 'thinking' && block.thinking && block.signature) {
+            thinkingBlocks.push({ type: 'thinking', thinking: block.thinking, signature: block.signature })
+          } else if (block.type === 'text' && block.text) {
+            textContent = block.text
+          } else if (block.type === 'tool_use' && block.id && block.name) {
+            // Tool call embedded in content array (Anthropic format)
+            embeddedToolCall = {
+              id: block.id,
+              name: block.name,
+              arguments: typeof block.input === 'string' ? block.input : JSON.stringify(block.input ?? {}),
+            }
+          }
+        }
+      } else if (typeof message?.content === 'string') {
+        textContent = message.content
+      }
+
+      // Also check OpenAI-format tool_calls (used when thinking is off or by non-Anthropic models)
+      const rawToolCall = (message?.tool_calls?.[0] as { id?: string; function?: { name?: string; arguments?: string } } | undefined)
+      const resolvedToolCall = embeddedToolCall ?? (rawToolCall?.id && rawToolCall.function?.name
+        ? { id: rawToolCall.id, name: rawToolCall.function.name, arguments: rawToolCall.function.arguments ?? '' }
+        : undefined)
+
+      console.log('[api] non-stream tool_call found:', !!resolvedToolCall, resolvedToolCall?.name ?? '(none)', 'thinking blocks:', thinkingBlocks.length)
 
       const result: StreamResult = {
-        content: typeof content === 'string' ? content : '',
-        ...(rawToolCall?.id && rawToolCall.function?.name
-          ? {
-              toolCall: {
-                id: rawToolCall.id,
-                name: rawToolCall.function.name,
-                arguments: rawToolCall.function.arguments ?? '',
-              },
-            }
-          : {}),
+        content: textContent,
+        ...(resolvedToolCall ? { toolCall: resolvedToolCall } : {}),
+        ...(thinkingBlocks.length > 0 ? { thinkingBlocks } : {}),
       }
 
       if (result.content) onDelta(result.content)

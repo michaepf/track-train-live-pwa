@@ -3,6 +3,19 @@ import { z } from 'zod'
 export const CONVERSATION_SCHEMA_VERSION = 1
 
 /**
+ * A thinking block returned by Anthropic extended thinking.
+ * Must be stored verbatim (including signature) and replayed in subsequent
+ * API calls — the signature is cryptographically validated server-side.
+ */
+export const ThinkingBlockSchema = z.object({
+  type: z.literal('thinking'),
+  thinking: z.string(),
+  signature: z.string(), // required for replay; blocks without a signature are discarded
+})
+
+export type ThinkingBlock = z.infer<typeof ThinkingBlockSchema>
+
+/**
  * A single message in a conversation thread.
  * Mirrors the OpenRouter/OpenAI message format closely so threads can be
  * passed directly to the API without transformation.
@@ -20,6 +33,8 @@ export const MessageSchema = z.object({
       arguments: z.string(), // raw JSON string from the model
     })
     .optional(),
+  // Extended thinking blocks from Anthropic models. Stored verbatim for replay.
+  thinkingBlocks: z.array(ThinkingBlockSchema).optional(),
   // Internal messages (e.g. retry instructions) — sent to the API but not shown in the UI
   hidden: z.boolean().optional(),
 })
