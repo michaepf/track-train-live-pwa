@@ -8,7 +8,7 @@ import {
   startLogin,
   AuthError,
 } from './lib/auth.ts'
-import { getCustomExercises } from './lib/db.ts'
+import { getCustomExercises, getSetting, setSetting } from './lib/db.ts'
 import { registerCustomExercises } from './data/exercises.ts'
 import Chat from './screens/Chat.tsx'
 import Today from './screens/Today.tsx'
@@ -60,6 +60,30 @@ class ErrorBoundary extends Component<
 }
 
 // ─── Auth screens ──────────────────────────────────────────────────────────────
+
+function FirstTimeModal({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="modal-overlay">
+      <div className="modal-card">
+        <h2 className="modal-title">Welcome to Track Train Live!</h2>
+        <div className="modal-content">
+          <p>
+            <strong>Important:</strong> All your data — workouts, chat history, and goals — is stored locally on this device only.
+          </p>
+          <p>
+            If you're setting up for the first time, use the device you'll take to the gym regularly. Your phone is usually the best choice.
+          </p>
+          <p className="modal-note">
+            Data doesn't sync between devices (e.g., your laptop and phone). Each device has its own separate data.
+          </p>
+        </div>
+        <button className="modal-btn" onClick={onDismiss}>
+          Got it
+        </button>
+      </div>
+    </div>
+  )
+}
 
 function LoginScreen({ error }: { error: string | null }) {
   const [starting, setStarting] = useState(false)
@@ -129,6 +153,9 @@ export default function App() {
   const [callbackError, setCallbackError] = useState<string | null>(null)
   const [screen, setScreen] = useState<ScreenId>('chat')
   const [chatStreaming, setChatStreaming] = useState(false)
+  const [showFirstTimeModal, setShowFirstTimeModal] = useState(false)
+
+  const SETTING_FIRST_TIME_SHOWN = 'firstTimeWarningShown'
 
   useEffect(() => {
     if (isCallbackUrl()) {
@@ -143,6 +170,9 @@ export default function App() {
           setApiKey(key ?? '')
           setScreen('chat')
           setAuthState('authenticated')
+          // Show first-time modal for new users
+          const shown = await getSetting(SETTING_FIRST_TIME_SHOWN)
+          if (!shown) setShowFirstTimeModal(true)
         })
         .catch((err: unknown) => {
           const message =
@@ -192,6 +222,11 @@ export default function App() {
     setScreen(nextScreen)
   }
 
+  async function dismissFirstTimeModal() {
+    await setSetting(SETTING_FIRST_TIME_SHOWN, 'true')
+    setShowFirstTimeModal(false)
+  }
+
   function renderActiveScreen() {
     switch (screen) {
       case 'today':
@@ -239,6 +274,7 @@ export default function App() {
             ))}
           </nav>
         </div>
+        {showFirstTimeModal && <FirstTimeModal onDismiss={dismissFirstTimeModal} />}
       </ApiKeyContext.Provider>
     </ErrorBoundary>
   )
