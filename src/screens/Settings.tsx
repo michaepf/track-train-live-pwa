@@ -9,6 +9,7 @@ import {
   listWorkouts,
   saveSummary,
   getGoals,
+  saveGoals,
   getSummary,
   saveWorkout,
   clearWorkoutsOnly,
@@ -21,11 +22,13 @@ import {
   buildHistoryContext,
   buildUpcomingPlannedContext,
   RECENT_HISTORY_DAYS,
+  needsGoalReview,
 } from '../lib/context.ts'
 import { SCENARIOS, type ScenarioKey } from '../lib/dev-fixtures.ts'
-import type { Workout } from '../lib/schemas/index.ts'
+import { GoalsSchema } from '../lib/schemas/index.ts'
+import type { Goals, Workout } from '../lib/schemas/index.ts'
+import MarkdownText from '../components/MarkdownText.tsx'
 
-type ModelTier = 'premium' | 'affordable'
 type Scope = 'user' | 'both'
 
 interface ActionDef {
@@ -40,18 +43,6 @@ interface ActionDef {
   reload?: boolean
 }
 
-const MODEL_OPTIONS: { value: ModelTier; label: string; description: string }[] = [
-  {
-    value: 'premium',
-    label: 'Premium',
-    description: 'Claude Sonnet — best reasoning, higher cost per conversation',
-  },
-  {
-    value: 'affordable',
-    label: 'Affordable',
-    description: 'GLM / DeepSeek — good quality, lower cost',
-  },
-]
 
 const ACCOUNT_ACTIONS: ActionDef[] = [
   {
@@ -133,8 +124,12 @@ async function runSummaryPass(): Promise<string> {
 }
 
 export default function Settings() {
-  const [model, setModel] = useState<ModelTier>('affordable')
-  const [saving, setSaving] = useState(false)
+  const [goals, setGoals] = useState<Goals | null>(null)
+  const [goalsEditing, setGoalsEditing] = useState(false)
+  const [goalsDraft, setGoalsDraft] = useState('')
+  const [goalsSaving, setGoalsSaving] = useState(false)
+  const [goalsSaveError, setGoalsSaveError] = useState<string | null>(null)
+
   const [armedAction, setArmedAction] = useState<string | null>(null)
   const [activeAction, setActiveAction] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -147,18 +142,41 @@ export default function Settings() {
   const [scenarioStatus, setScenarioStatus] = useState<string | null>(null)
 
   useEffect(() => {
-    getSetting('model').then((stored) => {
-      if (stored === 'premium' || stored === 'affordable') {
-        setModel(stored)
-      }
-    })
+    getGoals().then(setGoals)
   }, [])
 
-  async function handleModelChange(value: ModelTier) {
-    setModel(value)
-    setSaving(true)
-    await setSetting('model', value)
-    setSaving(false)
+  function startEditingGoals() {
+    setGoalsDraft(goals?.text ?? '')
+    setGoalsSaveError(null)
+    setGoalsEditing(true)
+  }
+
+  function cancelEditingGoals() {
+    setGoalsEditing(false)
+    setGoalsSaveError(null)
+  }
+
+  async function handleSaveGoals() {
+    const text = goalsDraft.trim()
+    const result = GoalsSchema.safeParse({
+      text,
+      updatedAt: new Date().toISOString(),
+      pendingReview: true,
+    })
+    if (!result.success) {
+      setGoalsSaveError(result.error.issues[0]?.message ?? 'Invalid goals text')
+      return
+    }
+    setGoalsSaving(true)
+    try {
+      await saveGoals(result.data)
+      setGoals(result.data)
+      setGoalsEditing(false)
+    } catch {
+      setGoalsSaveError('Failed to save — please try again')
+    } finally {
+      setGoalsSaving(false)
+    }
   }
 
   function arm(key: string) {
@@ -283,7 +301,7 @@ export default function Settings() {
             <button
               className="logout-btn"
               onClick={() => arm(def.key)}
-              disabled={busy || saving}
+              disabled={busy}
             >
               {isBusy ? def.busyLabel : def.label}
             </button>
@@ -296,33 +314,75 @@ export default function Settings() {
     )
   }
 
+  const goalsReviewNeeded = goals !== null && needsGoalReview(goals)
+
   return (
     <div className="screen-content">
       <h1>Settings</h1>
 
+      {/* Goals */}
       <section className="settings-section">
-        <div className="settings-label">AI Model</div>
-        <div className="settings-description">
-          Controls which model is used for planning conversations.{' '}
-          {saving && <span className="settings-saving">Saving…</span>}
-        </div>
-        <div className="model-options">
-          {MODEL_OPTIONS.map((opt) => (
-            <label key={opt.value} className="model-option">
-              <input
-                type="radio"
-                name="model"
-                value={opt.value}
-                checked={model === opt.value}
-                onChange={() => handleModelChange(opt.value)}
-              />
-              <div className="model-option-text">
-                <span className="model-option-label">{opt.label}</span>
-                <span className="model-option-desc">{opt.description}</span>
-              </div>
-            </label>
-          ))}
-        </div>
+        <div className="settings-label">Goals</div>
+        {goalsReviewNeeded && (
+          <div className="goals-review-badge">
+            Due for review — start a Chat to update with your AI trainer
+          </div>
+        )}
+        {goalsEditing ? (
+          <div className="goals-edit">
+            <textarea
+              className="goals-textarea"
+              value={goalsDraft}
+              onChange={(e) => setGoalsDraft(e.target.value)}
+              placeholder="Describe your training goals…"
+              rows={8}
+              maxLength={2000}
+              autoFocus
+            />
+            <div className="goals-char-count">{goalsDraft.length} / 2000</div>
+            {goalsSaveError && <p className="goals-error">{goalsSaveError}</p>}
+            <div className="goals-actions">
+              <button
+                className="goals-btn goals-btn--primary"
+                onClick={handleSaveGoals}
+                disabled={goalsSaving || !goalsDraft.trim()}
+              >
+                {goalsSaving ? 'Saving…' : 'Save Goals'}
+              </button>
+              <button
+                className="goals-btn goals-btn--secondary"
+                onClick={cancelEditingGoals}
+                disabled={goalsSaving}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : goals ? (
+          <div className="goals-view">
+            <div className="goals-text"><MarkdownText text={goals.text} /></div>
+            <div className="goals-meta">
+              Last updated: {new Date(goals.updatedAt).toLocaleDateString()}
+            </div>
+            <button className="goals-btn goals-btn--primary" onClick={startEditingGoals}>
+              Edit Goals
+            </button>
+          </div>
+        ) : (
+          <div className="goals-empty">
+            <p className="placeholder-text">No goals set yet.</p>
+            <p className="placeholder-text" style={{ marginTop: 8 }}>
+              Head to Chat to set your goals with your AI trainer, or set them manually.
+            </p>
+            <button
+              className="goals-btn goals-btn--primary"
+              style={{ marginTop: 16 }}
+              onClick={startEditingGoals}
+            >
+              Set Goals Manually
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="settings-section">
@@ -336,8 +396,8 @@ export default function Settings() {
         {actionError && <div className="settings-error">{actionError}</div>}
       </section>
 
-      <section className="settings-section">
-        <div className="settings-label">Developer</div>
+      <details className="settings-section settings-dev-accordion">
+        <summary className="settings-label settings-dev-summary">Developer</summary>
 
         {/* Run summary pass */}
         <div className="settings-action">
@@ -434,7 +494,7 @@ export default function Settings() {
             </div>
           )
         })}
-      </section>
+      </details>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { streamChat, MODELS } from '../lib/api.ts'
+import type { ModelTier } from '../lib/api.ts'
 import { EXERCISE_MAP } from '../data/exercises.ts'
 import {
   buildSystemPrompt,
@@ -22,6 +23,7 @@ import {
   deleteWorkout,
   getSummary,
   getSetting,
+  setSetting,
 } from '../lib/db.ts'
 import {
   GoalsSchema,
@@ -512,6 +514,9 @@ export default function Chat({ onStreamingChange }: ChatProps) {
   const [toolCard, setToolCard] = useState<ToolCardState | null>(null)
   const [pendingTool, setPendingTool] = useState<PendingTool | null>(null)
 
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [resetArmed, setResetArmed] = useState(false)
+
   const [initialized, setInitialized] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
@@ -890,6 +895,17 @@ export default function Chat({ onStreamingChange }: ChatProps) {
     }
   }
 
+  async function handleModelToggle(tier: ModelTier) {
+    const newModel = MODELS[tier]
+    setModel(newModel)
+    await setSetting('model', tier)
+  }
+
+  function closeMenu() {
+    setMenuOpen(false)
+    setResetArmed(false)
+  }
+
   // ─── Tool card actions ────────────────────────────────────────────────────────
 
   async function handleAcceptGoals(text: string) {
@@ -1034,11 +1050,58 @@ export default function Chat({ onStreamingChange }: ChatProps) {
         <span className="chat-mode-label">
           {mode === 'onboarding' ? 'Setup' : mode === 'goal_review' ? 'Goal Review' : 'Planning'}
         </span>
-        {messages.length > 0 && (
-          <button className="chat-new-btn" onClick={handleNewConversation}>
-            New
+        <div className="chat-header-right">
+          <button className="chat-menu-btn" onClick={() => setMenuOpen((o) => !o)} aria-label="Chat options">
+            ⋮
           </button>
-        )}
+          {menuOpen && (
+            <>
+              <div className="chat-menu-backdrop" onClick={closeMenu} />
+              <div className="chat-menu-dropdown">
+                <div className="chat-menu-section-label">Model</div>
+                {(['affordable', 'premium'] as ModelTier[]).map((tier) => (
+                  <button
+                    key={tier}
+                    className={`chat-menu-option${model === MODELS[tier] ? ' chat-menu-option--active' : ''}`}
+                    onClick={() => { handleModelToggle(tier); closeMenu() }}
+                  >
+                    <span className="chat-menu-option-name">
+                      {tier === 'affordable' ? 'Affordable' : 'Premium'}
+                    </span>
+                    <span className="chat-menu-option-desc">
+                      {tier === 'affordable' ? 'GLM · lower cost' : 'Claude Sonnet · higher cost'}
+                    </span>
+                  </button>
+                ))}
+                <div className="chat-menu-divider" />
+                {!resetArmed ? (
+                  <button
+                    className="chat-menu-option chat-menu-option--danger"
+                    onClick={() => setResetArmed(true)}
+                  >
+                    <span className="chat-menu-option-name">Reset Chat</span>
+                    <span className="chat-menu-option-desc">Start a new conversation</span>
+                  </button>
+                ) : (
+                  <div className="chat-menu-confirm">
+                    <span className="chat-menu-confirm-label">Reset conversation?</span>
+                    <div className="chat-menu-confirm-row">
+                      <button className="chat-menu-cancel-btn" onClick={() => setResetArmed(false)}>
+                        Cancel
+                      </button>
+                      <button
+                        className="chat-menu-reset-btn"
+                        onClick={() => { handleNewConversation(); closeMenu() }}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Message list */}

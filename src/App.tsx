@@ -8,7 +8,6 @@ import {
   startLogin,
   AuthError,
 } from './lib/auth.ts'
-import Goals from './screens/Goals.tsx'
 import Chat from './screens/Chat.tsx'
 import Today from './screens/Today.tsx'
 import Workout from './screens/Workout.tsx'
@@ -97,13 +96,12 @@ function CallbackScreen() {
 
 // ─── Navigation ────────────────────────────────────────────────────────────────
 
-type ScreenId = 'today' | 'workout' | 'chat' | 'goals' | 'history' | 'settings'
+type ScreenId = 'today' | 'workout' | 'chat' | 'history' | 'settings'
 
 const SCREENS: { id: ScreenId; label: string; icon: string }[] = [
   { id: 'today',    label: 'Today',    icon: '📅' },
   { id: 'workout',  label: 'Workouts', icon: '💪' },
   { id: 'chat',     label: 'Chat',     icon: '💬' },
-  { id: 'goals',    label: 'Goals',    icon: '🎯' },
   { id: 'history',  label: 'Log',      icon: '📋' },
   { id: 'settings', label: 'Settings', icon: '⚙️' },
 ]
@@ -186,8 +184,6 @@ export default function App() {
         return <Workout />
       case 'chat':
         return <Chat onStreamingChange={setChatStreaming} />
-      case 'goals':
-        return <Goals />
       case 'history':
         return <History />
       case 'settings':
