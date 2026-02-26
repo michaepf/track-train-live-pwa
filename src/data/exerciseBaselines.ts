@@ -433,6 +433,47 @@ export function getBaselineRange(
   return baseline[sex][level]
 }
 
+const UNIT_LABEL: Record<BaselineUnit, string> = {
+  lb_total:              'lb total',
+  lb_per_hand:           'lb/hand',
+  assist_lb:             'lb assist',
+  seconds:               'sec',
+  reps_per_side:         'reps/side',
+  bodyweight_or_weighted:'BW/weighted',
+}
+
+/**
+ * Compact baseline table for injection into the AI system prompt.
+ *
+ * Format (one line per exercise):
+ *   exercise-id | M inexp/mod/exp | F inexp/mod/exp | unit
+ *
+ * Units follow the exercise (all levels use the same unit).
+ */
+export function buildBaselinePromptSection(): string {
+  const LEVELS: ExperienceLevel[] = ['inexperienced', 'moderate', 'experienced']
+
+  function rangeStr(r: BaselineRange): string {
+    return `${r.min}–${r.max}`
+  }
+
+  const lines = Object.values(EXERCISE_BASELINES).map((b) => {
+    const mRanges = LEVELS.map((l) => rangeStr(b.male[l])).join('/')
+    const fRanges = LEVELS.map((l) => rangeStr(b.female[l])).join('/')
+    const unit = UNIT_LABEL[b.male.inexperienced.unit]
+    return `  ${b.id} | M ${mRanges} | F ${fRanges} | ${unit}`
+  })
+
+  return [
+    '## Starter Weight Reference',
+    '',
+    'Use when proposing weights for a user with no prior workout history.',
+    'Columns: inexperienced / moderate / experienced. Pick the lower end for complete beginners.',
+    '',
+    ...lines,
+  ].join('\n')
+}
+
 /**
  * Utility for sanity checks: returns exercise IDs present in catalog but
  * missing baseline entries.

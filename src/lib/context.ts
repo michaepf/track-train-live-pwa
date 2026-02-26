@@ -14,6 +14,7 @@ import {
   type Workout,
 } from './schemas/index.ts'
 import { buildCatalogPromptSection } from '../data/exercises.ts'
+import { buildBaselinePromptSection } from '../data/exerciseBaselines.ts'
 
 // ─── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -353,6 +354,7 @@ export function buildSystemPrompt(
     `## Planning Window (D0–D6)\n\n${windowStr}`,
     goalsSection,
     mode === 'planning' ? buildCatalogPromptSection() : '',
+    mode !== 'goal_review' ? buildBaselinePromptSection() : '',
     upcomingSection,
     historySection,
   ].filter(Boolean)
