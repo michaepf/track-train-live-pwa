@@ -493,6 +493,13 @@ export default function Settings() {
           )
         })}
       </details>
+
+      <p className="settings-attribution">
+        Created by{' '}
+        <a href="https://bsky.app/profile/michael-flynn.bsky.social" target="_blank" rel="noreferrer">
+          @michael-flynn.bsky.social
+        </a>
+      </p>
     </div>
   )
 }

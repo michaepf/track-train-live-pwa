@@ -84,6 +84,12 @@ function LoginScreen({ error }: { error: string | null }) {
         <button className="login-btn" onClick={handleLogin} disabled={starting}>
           {starting ? 'Redirecting…' : 'Connect with OpenRouter'}
         </button>
+        <p className="auth-attribution">
+          Created by{' '}
+          <a href="https://bsky.app/profile/michael-flynn.bsky.social" target="_blank" rel="noreferrer">
+            @michael-flynn.bsky.social
+          </a>
+        </p>
       </div>
     </div>
   )
