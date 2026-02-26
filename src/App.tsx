@@ -147,6 +147,8 @@ const SCREENS: { id: ScreenId; label: string; icon: string }[] = [
 
 type AuthState = 'loading' | 'callback' | 'unauthenticated' | 'authenticated'
 
+const SETTING_FIRST_TIME_SHOWN = 'firstTimeWarningShown'
+
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>('loading')
   const [apiKey, setApiKey] = useState<string>('')
@@ -154,8 +156,6 @@ export default function App() {
   const [screen, setScreen] = useState<ScreenId>('chat')
   const [chatStreaming, setChatStreaming] = useState(false)
   const [showFirstTimeModal, setShowFirstTimeModal] = useState(false)
-
-  const SETTING_FIRST_TIME_SHOWN = 'firstTimeWarningShown'
 
   useEffect(() => {
     if (isCallbackUrl()) {
