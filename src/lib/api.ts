@@ -213,10 +213,12 @@ export async function streamChat(opts: StreamChatOpts): Promise<void> {
     messages: buildApiMessages(systemPrompt, messages),
   }
 
-  // Enable extended thinking for Anthropic models.
-  // budget_tokens caps thinking token usage per response; the model uses less if the task is simple.
+  // Enable reasoning. Anthropic models use their own thinking parameter; all others use
+  // OpenRouter's unified reasoning parameter (which GLM-5 and similar models support).
   if (isAnthropicModel(model)) {
     body.thinking = { type: 'enabled', budget_tokens: 8000 }
+  } else {
+    body.reasoning = { enabled: true }
   }
 
   if (tools && tools.length > 0) {
@@ -283,6 +285,7 @@ export async function streamChat(opts: StreamChatOpts): Promise<void> {
       type RawMessage = {
         content?: string | RawContentBlock[] | null
         tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[]
+        reasoning?: string // OpenRouter unified reasoning field (GLM-5 and similar)
       }
       const message = (json as { choices?: { message?: RawMessage }[] }).choices?.[0]?.message
 
@@ -315,6 +318,9 @@ export async function streamChat(opts: StreamChatOpts): Promise<void> {
         ? { id: rawToolCall.id, name: rawToolCall.function.name, arguments: rawToolCall.function.arguments ?? '' }
         : undefined)
 
+      if (message?.reasoning) {
+        console.log('[api] non-stream reasoning present, length:', message.reasoning.length)
+      }
       console.log('[api] non-stream tool_call found:', !!resolvedToolCall, resolvedToolCall?.name ?? '(none)', 'thinking blocks:', thinkingBlocks.length)
 
       const result: StreamResult = {
