@@ -1017,8 +1017,12 @@ export default function Chat({ onStreamingChange }: ChatProps) {
 
   // ─── New conversation ─────────────────────────────────────────────────────────
 
-  function handleNewConversation() {
+  async function handleNewConversation() {
     abortRef.current?.abort()
+    // Persist empty messages before clearing state so remount doesn't restore the old thread
+    if (conv) {
+      await persistConv([], conv, mode)
+    }
     setConv(null)
     setMessages([])
     setStreamingContent('')
