@@ -78,7 +78,7 @@ function LoginScreen({ error }: { error: string | null }) {
         <ul className="auth-features">
           <li>All data is stored locally on your device — nothing leaves it except AI messages.</li>
           <li>Requires a free <a href="https://openrouter.ai" target="_blank" rel="noreferrer">OpenRouter</a> account. You pay for AI usage directly — the app never handles money.</li>
-          <li>Estimated cost for heavy use: ~$1–2/month when using the standard model.</li>
+          <li>Estimated cost for heavy use: ~$2–$5/month. You can set a monthly spending limit in your <a href="https://openrouter.ai/settings/limits" target="_blank" rel="noreferrer">OpenRouter account settings</a>.</li>
         </ul>
         {error && <p className="auth-error">{error}</p>}
         <button className="login-btn" onClick={handleLogin} disabled={starting}>
