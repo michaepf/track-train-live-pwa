@@ -1,7 +1,5 @@
 import { useState, useEffect } from 'react'
 import {
-  getSetting,
-  setSetting,
   clearAllData,
   clearGoals,
   clearCompletedWorkouts,
