@@ -8,9 +8,10 @@ import {
   migrateConversation,
   isWorkoutCompleted,
 } from './schemas/index.ts'
+import type { Exercise } from '../data/exercises.ts'
 
 export const DB_NAME = 'track-train-live'
-export const DB_VERSION = 1
+export const DB_VERSION = 2
 
 let _db: Promise<IDBDatabase> | null = null
 
@@ -65,7 +66,10 @@ function upgrade(event: IDBVersionChangeEvent): void {
     db.createObjectStore('settings')
   }
 
-  // Future migrations: if (oldVersion < 2) { ... }
+  if (oldVersion < 2) {
+    // customExercises — out-of-line key (exercise id string)
+    db.createObjectStore('customExercises')
+  }
 }
 
 function idbReq<T>(request: IDBRequest<T>): Promise<T> {
@@ -272,6 +276,33 @@ export async function deleteSetting(key: string): Promise<void> {
   const db = await getDB()
   await idbReq(
     db.transaction('settings', 'readwrite').objectStore('settings').delete(key),
+  )
+}
+
+// ─── Custom Exercises ──────────────────────────────────────────────────────────
+
+/** Returns all custom exercises sorted by name. */
+export async function getCustomExercises(): Promise<Exercise[]> {
+  const db = await getDB()
+  const results: unknown[] = await idbReq(
+    db.transaction('customExercises', 'readonly').objectStore('customExercises').getAll(),
+  )
+  return (results as Exercise[]).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** Saves (creates or replaces) a custom exercise. The exercise id is the store key. */
+export async function saveCustomExercise(ex: Exercise): Promise<void> {
+  const db = await getDB()
+  await idbReq(
+    db.transaction('customExercises', 'readwrite').objectStore('customExercises').put(ex, ex.id),
+  )
+}
+
+/** Deletes a custom exercise by id. No-ops if not found. */
+export async function deleteCustomExercise(id: string): Promise<void> {
+  const db = await getDB()
+  await idbReq(
+    db.transaction('customExercises', 'readwrite').objectStore('customExercises').delete(id),
   )
 }
 

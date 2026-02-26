@@ -13,7 +13,7 @@ import {
   type Goals,
   type Workout,
 } from './schemas/index.ts'
-import { buildCatalogPromptSection } from '../data/exercises.ts'
+import { buildCatalogPromptSection, type Exercise } from '../data/exercises.ts'
 import { buildBaselinePromptSection } from '../data/exerciseBaselines.ts'
 
 // ─── Date helpers ──────────────────────────────────────────────────────────────
@@ -329,6 +329,7 @@ export function buildSystemPrompt(
   mode: ConvMode,
   historyContext = '',
   upcomingContext = '',
+  customExercises: Exercise[] = [],
 ): string {
   const window = getPlanningWindow()
   const windowStr = window.map((d, i) => `  D${i}: ${d.date} — ${d.label}`).join('\n')
@@ -353,7 +354,7 @@ export function buildSystemPrompt(
     `## Tool Instructions\n\n${TOOL_INSTRUCTIONS[mode]}`,
     `## Planning Window (D0–D6)\n\n${windowStr}`,
     goalsSection,
-    mode === 'planning' ? buildCatalogPromptSection() : '',
+    mode === 'planning' ? buildCatalogPromptSection(customExercises) : '',
     mode !== 'goal_review' ? buildBaselinePromptSection() : '',
     upcomingSection,
     historySection,

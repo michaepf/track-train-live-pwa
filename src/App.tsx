@@ -8,6 +8,8 @@ import {
   startLogin,
   AuthError,
 } from './lib/auth.ts'
+import { getCustomExercises } from './lib/db.ts'
+import { registerCustomExercises } from './data/exercises.ts'
 import Chat from './screens/Chat.tsx'
 import Today from './screens/Today.tsx'
 import Workout from './screens/Workout.tsx'
@@ -167,6 +169,8 @@ export default function App() {
           return
         }
         setApiKey(key)
+        // Register custom exercises so getExerciseName() resolves them in all screens
+        getCustomExercises().then(registerCustomExercises).catch(() => {})
         setAuthState('authenticated')
       })
       .catch(() => {

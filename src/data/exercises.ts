@@ -188,17 +188,29 @@ export const EXERCISES: Exercise[] = [
   },
 ]
 
-/** id → display name lookup */
+/** id → display name lookup for built-in exercises */
 export const EXERCISE_MAP: Record<string, string> = Object.fromEntries(
   EXERCISES.map((e) => [e.id, e.name]),
 )
 
+/** Runtime name lookup for user-added custom exercises. Populated via registerCustomExercises(). */
+let customExerciseMap: Record<string, string> = {}
+
+/**
+ * Registers the current set of custom exercises so getExerciseName() can resolve them.
+ * Call on app startup after loading from IndexedDB, and after any add/remove.
+ */
+export function registerCustomExercises(exercises: Exercise[]): void {
+  customExerciseMap = Object.fromEntries(exercises.map((e) => [e.id, e.name]))
+}
+
 /**
  * Returns the display name for an exercise ID.
- * Falls back to humanizing the slug if the ID is not in the catalog.
+ * Checks custom exercises first, then built-ins, then humanizes the slug.
  */
 export function getExerciseName(id: string): string {
   return (
+    customExerciseMap[id] ??
     EXERCISE_MAP[id] ??
     id.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
   )
@@ -206,15 +218,16 @@ export function getExerciseName(id: string): string {
 
 /**
  * Compact catalog listing for injection into the AI system prompt.
- * One line per exercise: "  id — Name"
+ * Always includes built-in exercises. Custom exercises are appended if provided.
  */
-export function buildCatalogPromptSection(): string {
-  const lines = EXERCISES.map((e) => `  ${e.id}`)
+export function buildCatalogPromptSection(customExercises: Exercise[] = []): string {
+  const catalog = [...EXERCISES, ...customExercises]
+  const lines = catalog.map((e) => `  ${e.id}`)
   return [
     '## Exercise Catalog',
     '',
     'Use only these exerciseId values in workout entries. Do not invent new IDs.',
-    'To add a new exercise, ask the user — do not guess.',
+    'Use add_exercise to add a new exercise before referencing it.',
     '',
     ...lines,
   ].join('\n')

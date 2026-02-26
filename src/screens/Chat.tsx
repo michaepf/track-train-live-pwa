@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { streamChat, MODELS } from '../lib/api.ts'
 import type { ModelTier } from '../lib/api.ts'
-import { EXERCISE_MAP } from '../data/exercises.ts'
+import { EXERCISE_MAP, registerCustomExercises } from '../data/exercises.ts'
 import {
   buildSystemPrompt,
   buildHistoryContext,
@@ -24,7 +24,11 @@ import {
   getSummary,
   getSetting,
   setSetting,
+  getCustomExercises,
+  saveCustomExercise,
+  deleteCustomExercise,
 } from '../lib/db.ts'
+import type { Exercise } from '../data/exercises.ts'
 import {
   GoalsSchema,
   WorkoutSchema,
@@ -96,6 +100,35 @@ const PROPOSE_WORKOUT_TOOL = {
   },
 }
 
+const ADD_EXERCISE_TOOL = {
+  name: 'add_exercise',
+  description:
+    'Add a new exercise to the user\'s custom exercise catalog. Use when the user asks to add an exercise not in the built-in list, or when you need an exercise that does not exist yet.',
+  parameters: {
+    type: 'object',
+    properties: {
+      id:          { type: 'string', description: 'kebab-case slug, e.g. "bulgarian-split-squat"' },
+      name:        { type: 'string', description: 'Display name, e.g. "Bulgarian Split Squat"' },
+      description: { type: 'string', description: 'Brief description of the exercise' },
+      tags:        { type: 'array', items: { type: 'string' }, description: 'Category tags, e.g. ["legs","dumbbells"]' },
+    },
+    required: ['id', 'name', 'description', 'tags'],
+  },
+}
+
+const REMOVE_EXERCISE_TOOL = {
+  name: 'remove_exercise',
+  description:
+    'Remove a custom exercise from the user\'s catalog. Cannot remove built-in exercises — those are permanent.',
+  parameters: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The exercise id to remove' },
+    },
+    required: ['id'],
+  },
+}
+
 const DELETE_FUTURE_WORKOUTS_TOOL = {
   name: 'delete_future_workouts',
   description:
@@ -130,6 +163,8 @@ type ToolExecution =
       toDate?: string
       includeToday?: boolean
     }
+  | { kind: 'add_exercise'; exercise: Exercise }
+  | { kind: 'remove_exercise'; id: string }
 
 const MAX_FAKE_TOOL_RETRIES = 2
 const MAX_TOOL_VALIDATION_RETRIES = 2
@@ -162,11 +197,11 @@ function validateWorkoutDatesInPlanningWindow(
   return `Workout dates must be in the D0-D6 planning window. Invalid date(s): ${unique.join(', ')}`
 }
 
-function validateExerciseIds(workouts: ProposeWorkoutsPayload): string | null {
+function validateExerciseIds(workouts: ProposeWorkoutsPayload, customIds: Set<string>): string | null {
   const unknown: string[] = []
   for (const workout of workouts) {
     for (const entry of workout.entries ?? []) {
-      if (!(entry.exerciseId in EXERCISE_MAP)) {
+      if (!(entry.exerciseId in EXERCISE_MAP) && !customIds.has(entry.exerciseId)) {
         unknown.push(entry.exerciseId)
       }
     }
@@ -381,7 +416,7 @@ function getToolSchemaHint(toolName: string): string {
  * This is synchronous so onDone can build the final message array in one pass
  * before calling persistConv once.
  */
-function resolveToolCall(tc: PendingTool):
+function resolveToolCall(tc: PendingTool, customExerciseIds: Set<string> = new Set()):
   | { kind: 'card'; cardState: ToolCardState }
   | { kind: 'execute'; execution: ToolExecution }
   | { kind: 'error'; message: string; toolName: string } {
@@ -424,7 +459,7 @@ function resolveToolCall(tc: PendingTool):
         return { kind: 'error', message: dateIssue, toolName: tc.name }
       }
 
-      const exerciseIssue = validateExerciseIds(result.data)
+      const exerciseIssue = validateExerciseIds(result.data, customExerciseIds)
       if (exerciseIssue) {
         return { kind: 'error', message: exerciseIssue, toolName: tc.name }
       }
@@ -432,6 +467,32 @@ function resolveToolCall(tc: PendingTool):
       return { kind: 'card', cardState: { kind: 'workouts', workouts: result.data } }
     } catch {
       return { kind: 'error', message: 'Failed to parse workout proposal', toolName: tc.name }
+    }
+  }
+  if (tc.name === 'add_exercise') {
+    try {
+      const raw = JSON.parse(tc.arguments) as unknown
+      const p = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+      const id = asString(p.id)
+      const name = asString(p.name)
+      const description = asString(p.description) ?? ''
+      const tags = Array.isArray(p.tags) ? p.tags.filter((t): t is string => typeof t === 'string') : []
+      if (!id) return { kind: 'error', message: 'add_exercise: id is required', toolName: tc.name }
+      if (!name) return { kind: 'error', message: 'add_exercise: name is required', toolName: tc.name }
+      return { kind: 'execute', execution: { kind: 'add_exercise', exercise: { id, name, description, tags } } }
+    } catch {
+      return { kind: 'error', message: 'Failed to parse add_exercise arguments', toolName: tc.name }
+    }
+  }
+  if (tc.name === 'remove_exercise') {
+    try {
+      const raw = JSON.parse(tc.arguments) as unknown
+      const p = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+      const id = asString(p.id)
+      if (!id) return { kind: 'error', message: 'remove_exercise: id is required', toolName: tc.name }
+      return { kind: 'execute', execution: { kind: 'remove_exercise', id } }
+    } catch {
+      return { kind: 'error', message: 'Failed to parse remove_exercise arguments', toolName: tc.name }
     }
   }
   if (tc.name === 'delete_future_workouts') {
@@ -500,6 +561,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
   const apiKey = useApiKey()
 
   const [goals, setGoals] = useState<Goals | null>(null)
+  const [customExercises, setCustomExercises] = useState<Exercise[]>([])
   const [conv, setConv] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [mode, setMode] = useState<ConversationType>('planning')
@@ -528,11 +590,13 @@ export default function Chat({ onStreamingChange }: ChatProps) {
 
   useEffect(() => {
     async function init() {
-      const [goalsData, modelSetting, conversations] = await Promise.all([
+      const [goalsData, modelSetting, conversations, customEx] = await Promise.all([
         getGoals(),
         getSetting('model'),
         listConversations(20),
+        getCustomExercises(),
       ])
+      setCustomExercises(customEx)
 
       const convMode: ConversationType = !goalsData
         ? 'onboarding'
@@ -600,7 +664,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
       const capturedGoals = goals
       const capturedMode = mode
       const capturedModel = model
-      doStream([], null, capturedMode, capturedGoals, capturedModel)
+      doStream([], null, capturedMode, capturedGoals, capturedModel, customExercises)
     }
     // Intentionally omit doStream — stable within this effect's lifecycle
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -609,6 +673,26 @@ export default function Chat({ onStreamingChange }: ChatProps) {
   // ─── Streaming ───────────────────────────────────────────────────────────────
 
   async function executeToolAction(exec: ToolExecution): Promise<string> {
+    if (exec.kind === 'add_exercise') {
+      await saveCustomExercise(exec.exercise)
+      const updated = await getCustomExercises()
+      setCustomExercises(updated)
+      registerCustomExercises(updated)
+      return `Added exercise "${exec.exercise.name}" (${exec.exercise.id}) to your catalog.`
+    }
+
+    if (exec.kind === 'remove_exercise') {
+      // Silently no-op if it's a built-in exercise
+      if (exec.id in EXERCISE_MAP) {
+        return `"${exec.id}" is a built-in exercise and cannot be removed.`
+      }
+      await deleteCustomExercise(exec.id)
+      const updated = await getCustomExercises()
+      setCustomExercises(updated)
+      registerCustomExercises(updated)
+      return `Removed exercise "${exec.id}" from your catalog.`
+    }
+
     const allWorkouts = await listWorkouts(10000)
     const today = getToday()
 
@@ -649,6 +733,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
     currentMode: ConversationType,
     currentGoals: Goals | null,
     currentModel: string,
+    currentCustomExercises: Exercise[] = [],
   ) {
     if (!apiKey || !currentModel) {
       return
@@ -690,7 +775,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
       currentMode === 'onboarding' || currentMode === 'goal_review'
         ? [PROPOSE_GOALS_TOOL]
         : currentMode === 'planning'
-          ? [PROPOSE_WORKOUT_TOOL, DELETE_FUTURE_WORKOUTS_TOOL]
+          ? [PROPOSE_WORKOUT_TOOL, DELETE_FUTURE_WORKOUTS_TOOL, ADD_EXERCISE_TOOL, REMOVE_EXERCISE_TOOL]
           : []
 
     await streamChat({
@@ -699,7 +784,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
       messages: thread,
       tools,
       toolChoice: currentMode === 'planning' ? 'auto' : undefined,
-      systemPrompt: buildSystemPrompt(currentGoals, currentMode, historyContext, upcomingContext),
+      systemPrompt: buildSystemPrompt(currentGoals, currentMode, historyContext, upcomingContext, currentCustomExercises),
       signal: abortRef.current.signal,
 
       onDelta: (text) => {
@@ -726,7 +811,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
 
         if (result.toolCall) {
           const tc: PendingTool = result.toolCall
-          const resolved = resolveToolCall(tc)
+          const resolved = resolveToolCall(tc, new Set(currentCustomExercises.map((e) => e.id)))
           if (resolved.kind === 'error') {
             // Auto-resolve: append tool error result so the thread stays valid.
             // Input remains enabled — user can keep chatting.
@@ -754,7 +839,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
               const retryThread = [...finalMessages, retryInstruction]
               setMessages(retryThread)
               const savedConv = await persistConv(retryThread, currentConv, currentMode)
-              await doStream(retryThread, savedConv, currentMode, currentGoals, currentModel)
+              await doStream(retryThread, savedConv, currentMode, currentGoals, currentModel, currentCustomExercises)
               return
             }
             // Retry cap reached — leave error visible and keep input enabled.
@@ -888,7 +973,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
     toolValidationRetryRef.current = 0
 
     const savedConv = await persistConv(newThread, conv, mode)
-    await doStream(newThread, savedConv, mode, goals, model)
+    await doStream(newThread, savedConv, mode, goals, model, customExercises)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -941,7 +1026,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
     fakeToolRetryRef.current = 0
     toolValidationRetryRef.current = 0
     // Continue — model acknowledges acceptance
-    await doStream(newMessages, savedConv, nextMode, newGoals, model)
+    await doStream(newMessages, savedConv, nextMode, newGoals, model, customExercises)
   }
 
   async function handleAcceptWorkouts(workouts: ProposeWorkoutsPayload) {
@@ -1012,7 +1097,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
     const savedConv = await persistConv(newMessages, conv, mode)
     fakeToolRetryRef.current = 0
     toolValidationRetryRef.current = 0
-    await doStream(newMessages, savedConv, mode, goals, model)
+    await doStream(newMessages, savedConv, mode, goals, model, customExercises)
   }
 
   // ─── New conversation ─────────────────────────────────────────────────────────
