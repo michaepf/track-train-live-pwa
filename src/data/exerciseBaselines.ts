@@ -467,8 +467,9 @@ export function buildBaselinePromptSection(): string {
   return [
     '## Starter Weight Reference',
     '',
-    'Use when proposing weights for a user with no prior workout history.',
-    'Columns: inexperienced / moderate / experienced. Pick the lower end for complete beginners.',
+    'Use when proposing weights for a user with no prior workout history for a given exercise.',
+    'Columns: inexperienced / moderate / experienced.',
+    'IMPORTANT: Always default to the minimum of the inexperienced range unless the user\'s goals clearly state they are already training that movement at a higher weight. Starting too light is always preferable — the user can increase weight next session. Starting too heavy risks injury and discouragement.',
     '',
     ...lines,
   ].join('\n')
