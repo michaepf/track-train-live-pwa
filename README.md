@@ -32,7 +32,7 @@ This project was built by a semi-technical hobbyist with the help of AI coding a
 
 The main things to be aware of:
 
-- Your OpenRouter API key is stored in browser IndexedDB. Anyone with physical access to your device and browser could potentially extract it.
+- A provisioned OpenRouter API key (scoped to this app, not your master account key) is stored in browser IndexedDB. Anyone with physical access to your device and browser could potentially extract it — though exposure is limited to whatever spending cap you set during authorization.
 - Your conversations and workout data are sent to AI models via the OpenRouter API. Don't put anything in the chat you wouldn't want passing through a third-party AI service.
 - There's no server-side validation — the app is entirely client-side.
 
