@@ -373,14 +373,14 @@ export const EXERCISE_BASELINES: Record<string, ExerciseBaseline> = {
     male: {
       inexperienced: r(90, 120, 'assist_lb'),
       moderate: r(40, 80, 'assist_lb'),
-      experienced: r(0, 25, 'bodyweight_or_weighted'),
+      experienced: r(0, 20, 'assist_lb'),
     },
     female: {
       inexperienced: r(110, 140, 'assist_lb'),
       moderate: r(70, 110, 'assist_lb'),
-      experienced: r(20, 60, 'assist_lb'),
+      experienced: r(0, 40, 'assist_lb'),
     },
-    notes: 'Inexperienced and moderate users must always use machine assistance (numbers = lb of assist). Do NOT assign unassisted or weighted pullups unless the user explicitly states they can already do unassisted pullups.',
+    notes: 'Numbers = lb of machine assistance (higher = more help). Progress by reducing assistance and adding reps — NOT by adding weight. Do NOT assign weighted pullups; that is a separate exercise.',
   },
   'barbell-curl': {
     id: 'barbell-curl',
