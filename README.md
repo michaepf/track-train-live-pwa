@@ -9,6 +9,8 @@ An AI-powered personal training PWA. Chat with your AI trainer to set goals and 
 
 All data is stored locally on your device using IndexedDB. Nothing leaves your device except the messages sent to the AI. Requires a free [OpenRouter](https://openrouter.ai) account — you pay for AI usage directly at roughly $2–5/month for heavy use.
 
+**[Try it at track-train-live.netlify.app](https://track-train-live.netlify.app)**
+
 ## Tech notes
 
 - React + TypeScript, built with Vite
