@@ -373,14 +373,14 @@ export const EXERCISE_BASELINES: Record<string, ExerciseBaseline> = {
     male: {
       inexperienced: r(90, 120, 'assist_lb'),
       moderate: r(40, 80, 'assist_lb'),
-      experienced: r(0, 45, 'bodyweight_or_weighted'),
+      experienced: r(0, 25, 'bodyweight_or_weighted'),
     },
     female: {
       inexperienced: r(110, 140, 'assist_lb'),
       moderate: r(70, 110, 'assist_lb'),
       experienced: r(20, 60, 'assist_lb'),
     },
-    notes: 'For experienced lifters this can represent bodyweight to weighted pull-ups.',
+    notes: 'Inexperienced and moderate users must always use machine assistance (numbers = lb of assist). Do NOT assign unassisted or weighted pullups unless the user explicitly states they can already do unassisted pullups.',
   },
   'barbell-curl': {
     id: 'barbell-curl',
@@ -457,11 +457,12 @@ export function buildBaselinePromptSection(): string {
     return `${r.min}–${r.max}`
   }
 
-  const lines = Object.values(EXERCISE_BASELINES).map((b) => {
+  const lines = Object.values(EXERCISE_BASELINES).flatMap((b) => {
     const mRanges = LEVELS.map((l) => rangeStr(b.male[l])).join('/')
     const fRanges = LEVELS.map((l) => rangeStr(b.female[l])).join('/')
     const unit = UNIT_LABEL[b.male.inexperienced.unit]
-    return `  ${b.id} | M ${mRanges} | F ${fRanges} | ${unit}`
+    const row = `  ${b.id} | M ${mRanges} | F ${fRanges} | ${unit}`
+    return b.notes ? [row, `    note: ${b.notes}`] : [row]
   })
 
   return [
