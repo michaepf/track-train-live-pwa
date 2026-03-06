@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { EXERCISE_MAP } from '../data/exercises.ts'
+import { EXERCISES } from '../data/exercises.ts'
 import type { Exercise } from '../data/exercises.ts'
 import { getCustomExercises } from '../lib/db.ts'
 
@@ -20,15 +20,17 @@ export default function ExercisePicker({ currentExerciseId, onSelect, onClose }:
     searchRef.current?.focus()
   }, [])
 
-  const current = EXERCISE_MAP[currentExerciseId]
+  const current = EXERCISES.find((e) => e.id === currentExerciseId)
   const currentTags = current?.tags ?? []
 
-  const allExercises = [...Object.values(EXERCISE_MAP), ...customExercises]
+  const allExercises = [...EXERCISES, ...customExercises]
 
   const filtered = allExercises.filter((ex) => {
+    if (!ex?.id || !ex?.name) return false
     if (ex.id === currentExerciseId) return false
     const matchesQuery = !query || ex.name.toLowerCase().includes(query.toLowerCase())
-    const matchesTags = showAll || currentTags.length === 0 || currentTags.some((t) => ex.tags.includes(t))
+    const exTags = ex.tags ?? []
+    const matchesTags = showAll || currentTags.length === 0 || currentTags.some((t) => exTags.includes(t))
     return matchesQuery && matchesTags
   })
 
@@ -73,7 +75,7 @@ export default function ExercisePicker({ currentExerciseId, onSelect, onClose }:
               onClick={() => onSelect(ex.id)}
             >
               <span className="exercise-picker-item-name">{ex.name}</span>
-              <span className="exercise-picker-item-tags">{ex.tags.join(' · ')}</span>
+              <span className="exercise-picker-item-tags">{(ex.tags ?? []).join(' · ')}</span>
             </button>
           ))}
         </div>
