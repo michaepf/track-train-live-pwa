@@ -5,6 +5,7 @@ import {
   getPlanningWindow,
   needsGoalReview,
   buildHistoryContext,
+  buildUpcomingPlannedContext,
   buildSystemPrompt,
   generateWeeklySummary,
 } from './context.ts'
@@ -177,6 +178,61 @@ describe('buildHistoryContext', () => {
   })
 })
 
+// ─── buildUpcomingPlannedContext ──────────────────────────────────────────────
+
+describe('buildUpcomingPlannedContext', () => {
+  it('includes workout ids and set lock/open signals', () => {
+    const today = getToday()
+    const workout: Workout = {
+      _v: 1,
+      id: 42,
+      date: today,
+      workoutType: 'strength',
+      entries: [
+        {
+          exerciseId: 'bench-press',
+          sets: [
+            { plannedReps: 8, plannedWeight: 135 },
+            { plannedReps: 8, plannedWeight: 135, difficulty: 'completed' },
+          ],
+        },
+      ],
+      cardioMode: 'pick_one',
+      feedback: [],
+    }
+
+    const ctx = buildUpcomingPlannedContext([workout])
+    expect(ctx).toContain('id=42')
+    expect(ctx).toContain('entries: E0:bench-press')
+    expect(ctx).toContain('S1 open')
+    expect(ctx).toContain('S2 locked')
+  })
+
+  it('does not include per-set lines for not_started workouts', () => {
+    const today = getToday()
+    const workout: Workout = {
+      _v: 1,
+      id: 99,
+      date: today,
+      workoutType: 'strength',
+      entries: [
+        {
+          exerciseId: 'bench-press',
+          sets: [{ plannedReps: 8, plannedWeight: 135 }],
+        },
+      ],
+      cardioMode: 'pick_one',
+      feedback: [],
+    }
+
+    const ctx = buildUpcomingPlannedContext([workout])
+    expect(ctx).toContain('id=99')
+    expect(ctx).toContain('[not_started]')
+    expect(ctx).toContain('all sets editable')
+    expect(ctx).not.toContain('S1 open')
+  })
+})
+
 // ─── generateWeeklySummary ────────────────────────────────────────────────────
 
 describe('generateWeeklySummary', () => {
@@ -231,6 +287,8 @@ describe('buildSystemPrompt', () => {
   it('includes planning instructions for planning mode', () => {
     const prompt = buildSystemPrompt(null, 'planning')
     expect(prompt).toContain('propose_workout')
+    expect(prompt).toContain('edit_workout')
+    expect(prompt).toContain('swap_exercise')
   })
 
   it('includes D0–D6 planning window', () => {

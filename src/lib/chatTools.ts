@@ -91,9 +91,9 @@ export const REMOVE_EXERCISE_TOOL = {
 export const EDIT_WORKOUT_TOOL = {
   name: 'edit_workout',
   description:
-    'Patch the planned values (reps, weight, duration) of sets in an existing uncompleted workout. ' +
+    'Patch the planned values (reps, weight, duration) of sets in an existing workout. ' +
     'Cannot edit sets that already have difficulty logged, or workouts with status "completed". ' +
-    'Use delete_future_workouts + propose_workout to replace an entire workout instead.',
+    'Do not change workout title/session/date via this tool. Use delete_future_workouts + propose_workout to replace an entire workout instead.',
   parameters: {
     type: 'object',
     properties: {
@@ -103,9 +103,8 @@ export const EDIT_WORKOUT_TOOL = {
       },
       patches: {
         type: 'object',
-        description: 'Fields to update on the workout.',
+        description: 'Set-level planned value updates only.',
         properties: {
-          workoutType: { type: 'string' },
           entries: {
             type: 'array',
             items: {
@@ -133,6 +132,31 @@ export const EDIT_WORKOUT_TOOL = {
       },
     },
     required: ['workoutId', 'patches'],
+  },
+}
+
+export const SWAP_EXERCISE_TOOL = {
+  name: 'swap_exercise',
+  description:
+    'Swap one exercise in an existing workout entry. ' +
+    'Only allowed when that entry has no sets with difficulty logged, and the workout status is not "completed".',
+  parameters: {
+    type: 'object',
+    properties: {
+      workoutId: {
+        type: 'integer',
+        description: 'The numeric id of the workout to edit.',
+      },
+      entryIndex: {
+        type: 'integer',
+        description: 'Zero-based index into workout.entries.',
+      },
+      toExerciseId: {
+        type: 'string',
+        description: 'Target exerciseId from the Exercise Catalog.',
+      },
+    },
+    required: ['workoutId', 'entryIndex', 'toExerciseId'],
   },
 }
 
@@ -171,7 +195,6 @@ export type EditWorkoutSetPatch = {
 }
 
 export type EditWorkoutPatches = {
-  workoutType?: string
   entries?: Array<{
     entryIndex: number
     sets?: EditWorkoutSetPatch[]
@@ -188,6 +211,7 @@ export type ToolExecution =
   | { kind: 'add_exercise'; exercise: Exercise }
   | { kind: 'remove_exercise'; id: string }
   | { kind: 'edit_workout'; workoutId: number; patches: EditWorkoutPatches }
+  | { kind: 'swap_exercise'; workoutId: number; entryIndex: number; toExerciseId: string }
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -227,6 +251,26 @@ export function getToolSchemaHint(toolName: string): string {
       'Strict schema reminder for propose_goals:',
       '- arguments must be JSON object with { "text": string }.',
       '- text must be non-empty and <= 2000 chars.',
+    ].join('\n')
+  }
+  if (toolName === 'edit_workout') {
+    return [
+      'Strict schema reminder for edit_workout:',
+      '- arguments must be JSON object: {"workoutId": number, "patches": {...}}.',
+      '- workoutId must be a positive integer existing workout id.',
+      '- patches only supports entries: [{ entryIndex, sets: [{ setIndex, plannedReps?, plannedWeight?, targetSeconds? }] }].',
+      '- do not include date/session/workoutType changes.',
+      '- only patch planned values for sets that are not yet completed (no difficulty logged).',
+    ].join('\n')
+  }
+  if (toolName === 'swap_exercise') {
+    return [
+      'Strict schema reminder for swap_exercise:',
+      '- arguments must be JSON object: {"workoutId": number, "entryIndex": number, "toExerciseId": string}.',
+      '- workoutId must be a positive integer existing workout id.',
+      '- entryIndex must be a valid zero-based index for workout.entries.',
+      '- toExerciseId must match an exercise id from the Exercise Catalog.',
+      '- do not call this for completed workouts or entries already in progress.',
     ].join('\n')
   }
   return `Strict schema reminder: emit a valid ${toolName} tool call with correctly typed JSON arguments.`
@@ -558,7 +602,6 @@ export function resolveToolCall(tc: PendingTool, customExerciseIds: Set<string> 
       }
       const patchesRaw = (p.patches && typeof p.patches === 'object' ? p.patches : {}) as Record<string, unknown>
       const patches: EditWorkoutPatches = {}
-      if (typeof patchesRaw.workoutType === 'string') patches.workoutType = patchesRaw.workoutType
       if (Array.isArray(patchesRaw.entries)) {
         patches.entries = patchesRaw.entries
           .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
@@ -582,6 +625,34 @@ export function resolveToolCall(tc: PendingTool, customExerciseIds: Set<string> 
       return { kind: 'execute', execution: { kind: 'edit_workout', workoutId, patches } }
     } catch {
       return { kind: 'error', message: 'Failed to parse edit_workout arguments', toolName: tc.name }
+    }
+  }
+  if (tc.name === 'swap_exercise') {
+    try {
+      const raw = JSON.parse(tc.arguments) as unknown
+      const p = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+      const workoutId = typeof p.workoutId === 'number' && Number.isInteger(p.workoutId) && p.workoutId > 0
+        ? p.workoutId
+        : undefined
+      const entryIndex = typeof p.entryIndex === 'number' && Number.isInteger(p.entryIndex) && p.entryIndex >= 0
+        ? p.entryIndex
+        : undefined
+      const toExerciseId = typeof p.toExerciseId === 'string' ? p.toExerciseId.trim() : ''
+      if (!workoutId) {
+        return { kind: 'error', message: 'swap_exercise: workoutId must be a positive integer', toolName: tc.name }
+      }
+      if (entryIndex === undefined) {
+        return { kind: 'error', message: 'swap_exercise: entryIndex must be a non-negative integer', toolName: tc.name }
+      }
+      if (!toExerciseId) {
+        return { kind: 'error', message: 'swap_exercise: toExerciseId is required', toolName: tc.name }
+      }
+      return {
+        kind: 'execute',
+        execution: { kind: 'swap_exercise', workoutId, entryIndex, toExerciseId },
+      }
+    } catch {
+      return { kind: 'error', message: 'Failed to parse swap_exercise arguments', toolName: tc.name }
     }
   }
   // Unknown tool — auto-error so input never deadlocks

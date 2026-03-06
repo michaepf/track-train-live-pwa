@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { streamChat, MODELS } from '../lib/api.ts'
 import type { ModelTier } from '../lib/api.ts'
-import { EXERCISE_MAP, registerCustomExercises } from '../data/exercises.ts'
+import { EXERCISE_MAP, getExerciseName, registerCustomExercises } from '../data/exercises.ts'
 import {
   buildSystemPrompt,
   buildHistoryContext,
@@ -32,6 +32,7 @@ import type { Exercise } from '../data/exercises.ts'
 import {
   GoalsSchema,
   WorkoutSchema,
+  isEntryInProgress,
   isSetCompleted,
 } from '../lib/schemas/index.ts'
 import type {
@@ -55,6 +56,7 @@ import {
   REMOVE_EXERCISE_TOOL,
   DELETE_FUTURE_WORKOUTS_TOOL,
   EDIT_WORKOUT_TOOL,
+  SWAP_EXERCISE_TOOL,
   looksLikeFakeToolNarration,
   addDays,
   getToolSchemaHint,
@@ -70,6 +72,63 @@ Here's how it works: we'll start with a short conversation about your goals and 
 
 To get started: what's your current experience with exercise or training? Are you just getting started, coming back after a break, or already training consistently?`
 
+function buildEditWorkoutFollowupPrompt(outcome: string): string {
+  try {
+    const parsed = JSON.parse(outcome) as {
+      workoutId?: number
+      changedSetCount?: number
+      changedSets?: Array<{
+        entryIndex: number
+        setIndex: number
+        exerciseId: string
+        changes: string[]
+      }>
+    }
+    const changes = parsed.changedSets ?? []
+    if (changes.length === 0) {
+      return (
+        `edit_workout completed for workout ${parsed.workoutId ?? 'unknown'}, but there were no effective value changes. ` +
+        'Tell the user no set values changed.'
+      )
+    }
+
+    const lines = changes.map((c) => {
+      const changeText = c.changes.join('; ')
+      return `- E${c.entryIndex} S${c.setIndex + 1} (${c.exerciseId}): ${changeText}`
+    })
+    return [
+      `edit_workout applied to workout ${parsed.workoutId ?? 'unknown'}.`,
+      `Changed sets (${parsed.changedSetCount ?? changes.length}):`,
+      ...lines,
+      'Respond to the user with a concise natural-language confirmation that references these exact changes.',
+    ].join('\n')
+  } catch {
+    return (
+      'edit_workout completed. Read the tool result carefully and give the user a concise, specific summary of what changed.'
+    )
+  }
+}
+
+function buildSwapExerciseFollowupPrompt(outcome: string): string {
+  try {
+    const parsed = JSON.parse(outcome) as {
+      workoutId?: number
+      entryIndex?: number
+      fromName?: string
+      toName?: string
+      fromExerciseId?: string
+      toExerciseId?: string
+    }
+    return [
+      `swap_exercise applied to workout ${parsed.workoutId ?? 'unknown'}.`,
+      `Entry E${parsed.entryIndex ?? '?'} changed from ${parsed.fromName ?? parsed.fromExerciseId ?? 'unknown'} to ${parsed.toName ?? parsed.toExerciseId ?? 'unknown'}.`,
+      'Respond to the user with a concise natural-language confirmation of this change.',
+    ].join('\n')
+  } catch {
+    return 'swap_exercise completed. Read the tool result and give a concise user-facing confirmation.'
+  }
+}
+
 // ─── Message rendering ─────────────────────────────────────────────────────────
 
 function MessageBubble({ message }: { message: Message }) {
@@ -79,8 +138,9 @@ function MessageBubble({ message }: { message: Message }) {
   if (message.hidden) return null
   // Skip empty assistant bubbles (can happen when provider returns no text)
   if (message.role === 'assistant' && !message.content.trim()) return null
-  // Assistant messages with a tool call but no text content have nothing to show
-  if (message.role === 'assistant' && message.toolCall && !message.content) return null
+  // Keep existing behavior for most tools, but hide edit_workout tool-call turns
+  // so users see the post-edit confirmation instead of pre-tool filler text.
+  if (message.role === 'assistant' && message.toolCall?.name === 'edit_workout') return null
 
   return (
     <div className={`chat-message chat-message--${message.role}`}>
@@ -239,6 +299,12 @@ export default function Chat({ onStreamingChange }: ChatProps) {
       if (workout.status === 'completed') throw new Error(`Workout ${exec.workoutId} is completed and cannot be edited`)
 
       let updatedEntries = workout.entries ? [...workout.entries] : []
+      const changedSets: Array<{
+        entryIndex: number
+        setIndex: number
+        exerciseId: string
+        changes: string[]
+      }> = []
       for (const entryPatch of exec.patches.entries ?? []) {
         const entry = updatedEntries[entryPatch.entryIndex]
         if (!entry) throw new Error(`Entry index ${entryPatch.entryIndex} not found`)
@@ -247,14 +313,33 @@ export default function Chat({ onStreamingChange }: ChatProps) {
           const set = updatedSets[setPatch.setIndex]
           if (!set) throw new Error(`Set index ${setPatch.setIndex} not found in entry ${entryPatch.entryIndex}`)
           if (isSetCompleted(set)) throw new Error(`Set ${setPatch.setIndex} in entry ${entryPatch.entryIndex} already has difficulty logged`)
+          const nextSet = {
+            ...set,
+            ...(setPatch.plannedReps !== undefined ? { plannedReps: setPatch.plannedReps } : {}),
+            ...(setPatch.plannedWeight !== undefined ? { plannedWeight: setPatch.plannedWeight } : {}),
+            ...(setPatch.targetSeconds !== undefined ? { targetSeconds: setPatch.targetSeconds } : {}),
+          }
+          const changes: string[] = []
+          if (setPatch.plannedReps !== undefined && set.plannedReps !== nextSet.plannedReps) {
+            changes.push(`plannedReps ${set.plannedReps ?? 'unset'} -> ${nextSet.plannedReps ?? 'unset'}`)
+          }
+          if (setPatch.plannedWeight !== undefined && set.plannedWeight !== nextSet.plannedWeight) {
+            changes.push(`plannedWeight ${set.plannedWeight ?? 'unset'} -> ${nextSet.plannedWeight ?? 'unset'}`)
+          }
+          if (setPatch.targetSeconds !== undefined && set.targetSeconds !== nextSet.targetSeconds) {
+            changes.push(`targetSeconds ${set.targetSeconds ?? 'unset'} -> ${nextSet.targetSeconds ?? 'unset'}`)
+          }
+          if (changes.length > 0) {
+            changedSets.push({
+              entryIndex: entryPatch.entryIndex,
+              setIndex: setPatch.setIndex,
+              exerciseId: entry.exerciseId,
+              changes,
+            })
+          }
           updatedSets = [
             ...updatedSets.slice(0, setPatch.setIndex),
-            {
-              ...set,
-              ...(setPatch.plannedReps !== undefined ? { plannedReps: setPatch.plannedReps } : {}),
-              ...(setPatch.plannedWeight !== undefined ? { plannedWeight: setPatch.plannedWeight } : {}),
-              ...(setPatch.targetSeconds !== undefined ? { targetSeconds: setPatch.targetSeconds } : {}),
-            },
+            nextSet,
             ...updatedSets.slice(setPatch.setIndex + 1),
           ]
         }
@@ -268,10 +353,64 @@ export default function Chat({ onStreamingChange }: ChatProps) {
       const updated = {
         ...workout,
         entries: updatedEntries,
-        ...(exec.patches.workoutType !== undefined ? { workoutType: exec.patches.workoutType } : {}),
       }
       await saveWorkout(updated)
-      return 'Updated successfully.'
+      return JSON.stringify({
+        ok: true,
+        action: 'edit_workout',
+        workoutId: exec.workoutId,
+        changedSetCount: changedSets.length,
+        changedSets,
+      })
+    }
+
+    if (exec.kind === 'swap_exercise') {
+      const workout = await getWorkoutById(exec.workoutId)
+      if (!workout) throw new Error(`Workout ${exec.workoutId} not found`)
+      if (workout.status === 'completed') throw new Error(`Workout ${exec.workoutId} is completed and cannot be edited`)
+
+      const entries = workout.entries ? [...workout.entries] : []
+      const entry = entries[exec.entryIndex]
+      if (!entry) throw new Error(`Entry index ${exec.entryIndex} not found`)
+      if (isEntryInProgress(entry)) {
+        throw new Error(`Entry ${exec.entryIndex} already has progress and cannot be swapped`)
+      }
+      const isKnownExercise =
+        exec.toExerciseId in EXERCISE_MAP || customExercises.some((e) => e.id === exec.toExerciseId)
+      if (!isKnownExercise) {
+        throw new Error(`Unknown exerciseId: ${exec.toExerciseId}`)
+      }
+
+      const oldName = getExerciseName(entry.exerciseId)
+      const newName = getExerciseName(exec.toExerciseId)
+      entries[exec.entryIndex] = {
+        ...entry,
+        exerciseId: exec.toExerciseId,
+        aiNotes: undefined,
+      }
+      const updated = {
+        ...workout,
+        entries,
+        feedback: [
+          ...(workout.feedback ?? []),
+          {
+            source: 'ai' as const,
+            note: `Swapped ${oldName} -> ${newName}`,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }
+      await saveWorkout(updated)
+      return JSON.stringify({
+        ok: true,
+        action: 'swap_exercise',
+        workoutId: exec.workoutId,
+        entryIndex: exec.entryIndex,
+        fromExerciseId: entry.exerciseId,
+        toExerciseId: exec.toExerciseId,
+        fromName: oldName,
+        toName: newName,
+      })
     }
 
     const allWorkouts = await listWorkouts(10000)
@@ -356,7 +495,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
       currentMode === 'onboarding' || currentMode === 'goal_review'
         ? [PROPOSE_GOALS_TOOL]
         : currentMode === 'planning'
-          ? [PROPOSE_WORKOUT_TOOL, EDIT_WORKOUT_TOOL, DELETE_FUTURE_WORKOUTS_TOOL, ADD_EXERCISE_TOOL, REMOVE_EXERCISE_TOOL]
+          ? [PROPOSE_WORKOUT_TOOL, EDIT_WORKOUT_TOOL, SWAP_EXERCISE_TOOL, DELETE_FUTURE_WORKOUTS_TOOL, ADD_EXERCISE_TOOL, REMOVE_EXERCISE_TOOL]
           : []
 
     await streamChat({
@@ -435,14 +574,18 @@ export default function Chat({ onStreamingChange }: ChatProps) {
                   toolCallId: tc.id,
                 },
               ]
-              if (resolved.execution.kind === 'edit_workout') {
-                // Add a hidden nudge so the model describes what it changed
+              if (resolved.execution.kind === 'edit_workout' || resolved.execution.kind === 'swap_exercise') {
+                // Add a hidden nudge with explicit extracted details to avoid generic confirmations.
+                const followupPrompt =
+                  resolved.execution.kind === 'edit_workout'
+                    ? buildEditWorkoutFollowupPrompt(outcome)
+                    : buildSwapExerciseFollowupPrompt(outcome)
                 const threadWithNudge: Message[] = [
                   ...finalMessages,
                   {
                     role: 'user',
                     hidden: true,
-                    content: 'The edit was applied. In one sentence, confirm to the user what you just changed.',
+                    content: followupPrompt,
                   },
                 ]
                 setMessages(finalMessages)

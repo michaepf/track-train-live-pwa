@@ -9,7 +9,7 @@
  */
 
 import {
-  isWorkoutCompleted,
+  getWorkoutStatus,
   type Goals,
   type Workout,
 } from './schemas/index.ts'
@@ -111,6 +111,17 @@ const DIFF_SHORT: Record<string, string> = {
 }
 
 function formatSetCompact(set: {
+  plannedReps?: number
+  targetSeconds?: number
+  plannedWeight?: number
+}): string {
+  if (set.targetSeconds) return `${set.targetSeconds}s`
+  const reps = set.plannedReps ?? '?'
+  const weight = set.plannedWeight != null ? `x${set.plannedWeight}` : ''
+  return `${reps}${weight}`
+}
+
+function formatPlannedSet(set: {
   plannedReps?: number
   targetSeconds?: number
   plannedWeight?: number
@@ -272,9 +283,12 @@ export function buildUpcomingPlannedContext(workouts: Workout[]): string {
 
   if (inWindow.length === 0) return ''
 
-  const lines = ['Existing workouts in D0-D6 window:']
+  const lines = [
+    'Existing workouts in D0-D6 window (use these ids for edit_workout/swap_exercise):',
+    'For not_started workouts, all planned sets are editable. For in_progress workouts, only sets marked "open" are editable.',
+  ]
   for (const workout of inWindow) {
-    const status = isWorkoutCompleted(workout) ? 'completed' : 'planned'
+    const status = getWorkoutStatus(workout)
     const title = workout.session ?? workout.workoutType ?? 'workout'
     const exerciseCount = workout.entries?.length ?? 0
     const cardioCount = workout.cardioOptions?.length ?? 0
@@ -282,7 +296,33 @@ export function buildUpcomingPlannedContext(workouts: Workout[]): string {
     if (exerciseCount > 0) detailParts.push(`${exerciseCount} exercise${exerciseCount === 1 ? '' : 's'}`)
     if (cardioCount > 0) detailParts.push(`${cardioCount} cardio option${cardioCount === 1 ? '' : 's'}`)
     const detail = detailParts.length > 0 ? ` (${detailParts.join(', ')})` : ''
-    lines.push(`- ${workout.date}: ${title} [${status}]${detail}`)
+    const idLabel = workout.id !== undefined ? `id=${workout.id}` : 'id=missing'
+    lines.push(`- ${idLabel} | ${workout.date}: ${title} [${status}]${detail}`)
+    const entryMap = (workout.entries ?? []).map((entry, idx) => `E${idx}:${entry.exerciseId}`).join(', ')
+    if (entryMap) {
+      lines.push(`  - entries: ${entryMap}`)
+    }
+
+    if (status === 'not_started') {
+      lines.push('  - all sets editable')
+      continue
+    }
+
+    if (status === 'completed') {
+      lines.push('  - workout locked (completed)')
+      continue
+    }
+
+    for (const [entryIndex, entry] of (workout.entries ?? []).entries()) {
+      const setSummary = entry.sets
+        .map((set, idx) => {
+          const lock = set.difficulty !== undefined ? 'locked' : 'open'
+          const diff = set.difficulty ? `:${DIFF_SHORT[set.difficulty] ?? set.difficulty}` : ''
+          return `S${idx + 1} ${lock}${diff} ${formatPlannedSet(set)}`
+        })
+        .join(', ')
+      lines.push(`  - E${entryIndex}:${entry.exerciseId} -> ${setSummary}`)
+    }
   }
 
   return lines.join('\n')
@@ -297,7 +337,7 @@ const ROLE_INSTRUCTIONS: Record<ConvMode, string> = {
 
   goal_review: `You are an AI personal trainer reviewing a user's training goals. Acknowledge what's currently set, ask about recent changes or new priorities, and when ready, call \`propose_goals\` with an updated summary. Keep it focused — this should be a short review, not a full re-onboarding.`,
 
-  planning: `You are an AI personal trainer. Answer questions conversationally. When the user asks you to plan, schedule, add, or change workouts, call \`propose_workout\` with an array of workout objects — each using a date from the D0–D6 planning window. Always append new workouts; never attempt to replace or delete existing ones without explicit instruction.
+  planning: `You are an AI personal trainer. Answer questions conversationally. When the user asks you to plan, schedule, add, or broadly change workouts, call \`propose_workout\` with an array of workout objects — each using a date from the D0–D6 planning window. Always append new workouts; never attempt to replace or delete existing ones without explicit instruction.
 
 For user-facing text responses:
 - Do not use D0/D1/D2 labels in final wording; use real dates or weekday names.
@@ -310,9 +350,13 @@ const TOOL_INSTRUCTIONS: Record<ConvMode, string> = {
 
   goal_review: `Call \`propose_goals\` when you have an updated goals summary ready. The user will review and confirm. Do not narrate or describe the tool call in plain text — emit an actual tool call.`,
 
-  planning: `Use \`propose_workout\` only when proposing or modifying the workout schedule. For general questions, answer directly without calling any tool.
+  planning: `Use \`propose_workout\` when proposing or replacing workouts in the schedule. Use \`edit_workout\` only for small patches to planned set values in an existing workout. Use \`swap_exercise\` to replace one entry's exercise without changing the overall workout structure. For general questions, answer directly without calling any tool.
 
 When proposing: call \`propose_workout\` with an array of 1–7 workout objects, each using a date from the D0–D6 planning window. Review "Existing Workouts in Planning Window" before proposing — append around existing sessions; do not duplicate them. Each strength exercise entry must include multiple set objects in the \`sets\` array (typically 3 sets), each with \`plannedReps\` and \`plannedWeight\` in lb. Always include a weight — use the most recent result from history, or a conservative beginner estimate if no history exists. Omit \`plannedWeight\` only for bodyweight-only or timed-hold exercises (e.g. plank, dead bug).
+
+When editing: call \`edit_workout\` with a \`workoutId\` and set-level patches only (\`entryIndex\` + \`setIndex\`). Use the workout ids listed in "Existing Workouts in Planning Window". You may update only \`plannedReps\`, \`plannedWeight\`, or \`targetSeconds\`. Never edit workouts with status \`completed\`, and never edit sets that already have a \`difficulty\` value logged.
+
+When swapping: call \`swap_exercise\` with \`workoutId\`, \`entryIndex\`, and \`toExerciseId\`. Use \`entryIndex\` from the \`E0/E1\` mapping in "Existing Workouts in Planning Window". Never swap an entry that is already in progress (has any set with \`difficulty\`).
 
 Do not output markdown tables or D-label shorthand in user-visible text.`,
 }
