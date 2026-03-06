@@ -97,27 +97,32 @@ export type CardioOption = z.infer<typeof CardioOptionSchema>
 export type Difficulty = z.infer<typeof DifficultySchema>
 export type WorkoutStatus = z.infer<typeof WorkoutStatusSchema>
 
-function hasDifficultyCompletion(workout: Workout): boolean {
-  const entriesCompleted = (workout.entries ?? []).some((entry) =>
-    entry.sets.some((set) => set.difficulty !== undefined),
-  )
-  const cardioCompleted = (workout.cardioOptions ?? []).some(
-    (opt) => opt.difficulty !== undefined,
-  )
-  return entriesCompleted || cardioCompleted
-}
+/** Derived display status — distinct from the persisted WorkoutStatus field. */
+export type SessionStatus = 'not_started' | 'in_progress' | 'completed'
 
-export function getWorkoutStatus(workout: Workout): WorkoutStatus {
+export function getWorkoutStatus(workout: Workout): SessionStatus {
   if (workout.status === 'completed') return 'completed'
-  return hasDifficultyCompletion(workout) ? 'completed' : 'planned'
+
+  const entriesStarted = (workout.entries ?? []).some((e) =>
+    e.sets.some((s) => s.difficulty !== undefined),
+  )
+  const cardioStarted = (workout.cardioOptions ?? []).some(
+    (o) => o.difficulty !== undefined,
+  )
+
+  return entriesStarted || cardioStarted ? 'in_progress' : 'not_started'
 }
 
 /**
  * Returns true if a workout has any recorded difficulty values — i.e. the user
  * has started logging it. Completed workouts must never be overwritten.
  */
+/**
+ * Returns true if a workout has any logged progress — blocks deletion.
+ * Equivalent to: status is 'in_progress' or 'completed'.
+ */
 export function isWorkoutCompleted(workout: Workout): boolean {
-  return getWorkoutStatus(workout) === 'completed'
+  return getWorkoutStatus(workout) !== 'not_started'
 }
 
 /**

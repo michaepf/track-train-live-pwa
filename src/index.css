@@ -272,6 +272,31 @@ html, body {
 .today-workout-title {
   font-size: 0.95rem;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.today-status-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.today-status-badge--in_progress {
+  color: #fde68a;
+  border: 1px solid #92400e;
+  background: #3b1f00;
+}
+
+.today-status-badge--completed {
+  color: #b7f5c3;
+  border: 1px solid #2d7a44;
+  background: #1d3a27;
 }
 
 .today-save-indicator {

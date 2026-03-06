@@ -315,7 +315,14 @@ export default function Today() {
           return (
             <section className="today-workout" key={workout.id ?? `${workout.date}-${workout.session}`}>
               <div className="today-workout-header">
-                <div className="today-workout-title">{workout.session ?? workout.workoutType}</div>
+                <div className="today-workout-title">
+                  {workout.session ?? workout.workoutType}
+                  {status !== 'not_started' && (
+                    <span className={`today-status-badge today-status-badge--${status}`}>
+                      {status === 'completed' ? 'Done' : 'In Progress'}
+                    </span>
+                  )}
+                </div>
                 <div className="today-workout-header-right">
                   {workout.id && !isWorkoutCompleted(workout) && (
                     <button
