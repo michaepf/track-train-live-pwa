@@ -5,8 +5,10 @@ import ExerciseTip from '../components/ExerciseTip.tsx'
 import {
   getWorkoutStatus,
   isWorkoutCompleted,
+  isSetCompleted,
   type Difficulty,
   type Workout,
+  type WorkoutSet,
 } from '../lib/schemas/index.ts'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -55,6 +57,7 @@ export default function Today() {
   const [saveStateByWorkout, setSaveStateByWorkout] = useState<Record<number, SaveState>>({})
   const [noteDraftByWorkout, setNoteDraftByWorkout] = useState<Record<number, string>>({})
   const [entryNoteDrafts, setEntryNoteDrafts] = useState<Record<string, string>>({})
+  const [editingWorkoutId, setEditingWorkoutId] = useState<number | null>(null)
   const noteSaveTimersRef = useRef<Record<string, number>>({})
 
   async function loadToday() {
@@ -202,6 +205,30 @@ export default function Today() {
     void persistWorkout(updated)
   }
 
+  function updatePlannedSet(
+    workoutId: number,
+    entryIdx: number,
+    setIdx: number,
+    field: keyof Pick<WorkoutSet, 'plannedReps' | 'plannedWeight' | 'targetSeconds'>,
+    value: number | undefined,
+  ) {
+    const workout = workouts.find((w) => w.id === workoutId)
+    if (!workout || !workout.entries) return
+
+    const updatedEntries = workout.entries.map((entry, ei) => {
+      if (ei !== entryIdx) return entry
+      return {
+        ...entry,
+        sets: entry.sets.map((set, si) =>
+          si !== setIdx ? set : { ...set, [field]: value },
+        ),
+      }
+    })
+    const updated: Workout = { ...workout, entries: updatedEntries }
+    setWorkouts((prev) => prev.map((w) => (w.id === workoutId ? updated : w)))
+    scheduleNotePersist(`set:${workoutId}:${entryIdx}:${setIdx}`, updated)
+  }
+
   function updateCardioDifficulty(
     workoutId: number,
     optionIdx: number,
@@ -324,6 +351,24 @@ export default function Today() {
                   )}
                 </div>
                 <div className="today-workout-header-right">
+                  {workout.id && !manuallyCompleted && (
+                    editingWorkoutId === workout.id ? (
+                      <button
+                        className="today-edit-done-btn"
+                        onClick={() => setEditingWorkoutId(null)}
+                      >
+                        Done
+                      </button>
+                    ) : (
+                      <button
+                        className="today-edit-btn"
+                        onClick={() => setEditingWorkoutId(workout.id as number)}
+                        title="Edit planned values"
+                      >
+                        Edit
+                      </button>
+                    )
+                  )}
                   {workout.id && !isWorkoutCompleted(workout) && (
                     <button
                       className="today-delete-btn"
@@ -429,42 +474,100 @@ export default function Today() {
               {(workout.entries ?? []).map((entry, entryIdx) => (
                 <div key={`${entry.exerciseId}-${entryIdx}`} className="today-entry">
                   <div className="today-entry-name"><ExerciseTip exerciseId={entry.exerciseId} /></div>
-                  {entry.sets.map((set, setIdx) => (
-                    <div key={`${entry.exerciseId}-${setIdx}`} className="today-set-row">
-                      <span className="today-set-label">
-                        Set {setIdx + 1}: {setTargetLabel(set)}
-                      </span>
-                      <div className="today-diff-buttons">
-                        <button
-                          className={`today-diff-btn ${set.difficulty === 'could_not_complete' ? 'is-active is-fail' : ''}`}
-                          onClick={() =>
-                            workout.id &&
-                            updateSetDifficulty(workout.id, entryIdx, setIdx, 'could_not_complete')
-                          }
-                        >
-                          Fail
-                        </button>
-                        <button
-                          className={`today-diff-btn ${set.difficulty === 'completed' ? 'is-active is-done' : ''}`}
-                          onClick={() =>
-                            workout.id &&
-                            updateSetDifficulty(workout.id, entryIdx, setIdx, 'completed')
-                          }
-                        >
-                          Done
-                        </button>
-                        <button
-                          className={`today-diff-btn ${set.difficulty === 'too_easy' ? 'is-active is-easy' : ''}`}
-                          onClick={() =>
-                            workout.id &&
-                            updateSetDifficulty(workout.id, entryIdx, setIdx, 'too_easy')
-                          }
-                        >
-                          Easy
-                        </button>
+                  {entry.sets.map((set, setIdx) => {
+                    const isEditing = editingWorkoutId === workout.id && !isSetCompleted(set)
+                    return (
+                      <div key={`${entry.exerciseId}-${setIdx}`} className="today-set-row">
+                        {isEditing ? (
+                          <div className="today-set-edit">
+                            <span className="today-set-edit-label">Set {setIdx + 1}</span>
+                            {set.targetSeconds !== undefined ? (
+                              <label className="today-set-edit-field">
+                                <input
+                                  type="number"
+                                  className="today-set-edit-input"
+                                  min={1}
+                                  value={set.targetSeconds ?? ''}
+                                  onChange={(e) => {
+                                    const v = parseInt(e.target.value)
+                                    workout.id && updatePlannedSet(workout.id, entryIdx, setIdx, 'targetSeconds', isNaN(v) ? undefined : v)
+                                  }}
+                                />
+                                <span className="today-set-edit-unit">sec</span>
+                              </label>
+                            ) : (
+                              <label className="today-set-edit-field">
+                                <input
+                                  type="number"
+                                  className="today-set-edit-input"
+                                  min={1}
+                                  value={set.plannedReps ?? ''}
+                                  onChange={(e) => {
+                                    const v = parseInt(e.target.value)
+                                    workout.id && updatePlannedSet(workout.id, entryIdx, setIdx, 'plannedReps', isNaN(v) ? undefined : v)
+                                  }}
+                                />
+                                <span className="today-set-edit-unit">reps</span>
+                              </label>
+                            )}
+                            <label className="today-set-edit-field">
+                              <input
+                                type="number"
+                                className="today-set-edit-input"
+                                min={0}
+                                step={2.5}
+                                value={set.plannedWeight ?? ''}
+                                placeholder="—"
+                                onChange={(e) => {
+                                  const v = parseFloat(e.target.value)
+                                  workout.id && updatePlannedSet(workout.id, entryIdx, setIdx, 'plannedWeight', isNaN(v) ? undefined : v)
+                                }}
+                              />
+                              <span className="today-set-edit-unit">lb</span>
+                            </label>
+                          </div>
+                        ) : (
+                          <span className={`today-set-label${isSetCompleted(set) && editingWorkoutId === workout.id ? ' today-set-label--locked' : ''}`}>
+                            Set {setIdx + 1}: {setTargetLabel(set)}
+                          </span>
+                        )}
+                        {!isEditing && (
+                          <div className="today-diff-buttons">
+                            <button
+                              className={`today-diff-btn ${set.difficulty === 'could_not_complete' ? 'is-active is-fail' : ''}`}
+                              disabled={manuallyCompleted}
+                              onClick={() =>
+                                workout.id &&
+                                updateSetDifficulty(workout.id, entryIdx, setIdx, 'could_not_complete')
+                              }
+                            >
+                              Fail
+                            </button>
+                            <button
+                              className={`today-diff-btn ${set.difficulty === 'completed' ? 'is-active is-done' : ''}`}
+                              disabled={manuallyCompleted}
+                              onClick={() =>
+                                workout.id &&
+                                updateSetDifficulty(workout.id, entryIdx, setIdx, 'completed')
+                              }
+                            >
+                              Done
+                            </button>
+                            <button
+                              className={`today-diff-btn ${set.difficulty === 'too_easy' ? 'is-active is-easy' : ''}`}
+                              disabled={manuallyCompleted}
+                              onClick={() =>
+                                workout.id &&
+                                updateSetDifficulty(workout.id, entryIdx, setIdx, 'too_easy')
+                              }
+                            >
+                              Easy
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                   {workout.id && (
                     <div className="today-entry-note-block">
                       <label className="today-note-label">Exercise notes (optional)</label>
@@ -498,6 +601,7 @@ export default function Today() {
                       <div className="today-diff-buttons">
                         <button
                           className={`today-diff-btn ${option.difficulty === 'could_not_complete' ? 'is-active is-fail' : ''}`}
+                          disabled={manuallyCompleted}
                           onClick={() =>
                             workout.id &&
                             updateCardioDifficulty(workout.id, optionIdx, 'could_not_complete')
@@ -507,6 +611,7 @@ export default function Today() {
                         </button>
                         <button
                           className={`today-diff-btn ${option.difficulty === 'completed' ? 'is-active is-done' : ''}`}
+                          disabled={manuallyCompleted}
                           onClick={() =>
                             workout.id &&
                             updateCardioDifficulty(workout.id, optionIdx, 'completed')
@@ -516,6 +621,7 @@ export default function Today() {
                         </button>
                         <button
                           className={`today-diff-btn ${option.difficulty === 'too_easy' ? 'is-active is-easy' : ''}`}
+                          disabled={manuallyCompleted}
                           onClick={() =>
                             workout.id &&
                             updateCardioDifficulty(workout.id, optionIdx, 'too_easy')

@@ -486,6 +486,86 @@ html, body {
   gap: 10px;
 }
 
+.today-edit-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  padding: 3px 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.today-edit-btn:active {
+  background: var(--bg-elevated);
+}
+
+.today-edit-done-btn {
+  background: none;
+  border: 1px solid #2d7a44;
+  border-radius: 7px;
+  color: #b7f5c3;
+  font-size: 0.76rem;
+  padding: 3px 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.today-edit-done-btn:active {
+  background: #1d3a27;
+}
+
+.today-set-edit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.today-set-edit-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.today-set-edit-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.today-set-edit-input {
+  width: 52px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+  padding: 4px 6px;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.today-set-edit-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.today-set-edit-input::-webkit-inner-spin-button,
+.today-set-edit-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+.today-set-edit-unit {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.today-set-label--locked {
+  opacity: 0.45;
+}
+
 .today-delete-btn {
   background: none;
   border: 1px solid #7a2a2a;
