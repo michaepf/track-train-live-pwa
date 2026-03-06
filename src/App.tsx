@@ -8,8 +8,9 @@ import {
   startLogin,
   AuthError,
 } from './lib/auth.ts'
-import { getCustomExercises, getSetting, setSetting } from './lib/db.ts'
+import { getCustomExercises, getWorkoutsByDate, listWorkouts, getSetting, setSetting } from './lib/db.ts'
 import { registerCustomExercises } from './data/exercises.ts'
+import { getToday } from './lib/context.ts'
 import Chat from './screens/Chat.tsx'
 import Today from './screens/Today.tsx'
 import Workout from './screens/Workout.tsx'
@@ -201,6 +202,15 @@ export default function App() {
         setApiKey(key)
         // Register custom exercises so getExerciseName() resolves them in all screens
         getCustomExercises().then(registerCustomExercises).catch(() => {})
+        // Smart default screen: Today > Workouts > Chat
+        const today = getToday()
+        const todayWorkouts = await getWorkoutsByDate(today).catch(() => [])
+        if (todayWorkouts.length > 0) {
+          setScreen('today')
+        } else {
+          const recent = await listWorkouts(1).catch(() => [])
+          if (recent.length > 0 && recent[0].date > today) setScreen('workout')
+        }
         setAuthState('authenticated')
       })
       .catch(() => {
