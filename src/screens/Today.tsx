@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { getWorkoutsByDate, saveWorkout, deleteWorkout } from '../lib/db.ts'
 import { getToday } from '../lib/context.ts'
+import { getExerciseName } from '../data/exercises.ts'
 import ExerciseTip from '../components/ExerciseTip.tsx'
+import ExercisePicker from '../components/ExercisePicker.tsx'
 import {
   getWorkoutStatus,
   isWorkoutCompleted,
   isSetCompleted,
+  isEntryInProgress,
   type Difficulty,
   type Workout,
   type WorkoutSet,
@@ -58,6 +61,7 @@ export default function Today() {
   const [noteDraftByWorkout, setNoteDraftByWorkout] = useState<Record<number, string>>({})
   const [entryNoteDrafts, setEntryNoteDrafts] = useState<Record<string, string>>({})
   const [editingWorkoutId, setEditingWorkoutId] = useState<number | null>(null)
+  const [swapTarget, setSwapTarget] = useState<{ workoutId: number; entryIdx: number; exerciseId: string } | null>(null)
   const noteSaveTimersRef = useRef<Record<string, number>>({})
 
   async function loadToday() {
@@ -307,6 +311,31 @@ export default function Today() {
     }
   }
 
+  async function swapExercise(workoutId: number, entryIdx: number, newExerciseId: string) {
+    const workout = workouts.find((w) => w.id === workoutId)
+    if (!workout || !workout.entries) return
+    const entry = workout.entries[entryIdx]
+    if (!entry) return
+
+    const oldName = getExerciseName(entry.exerciseId)
+    const newName = getExerciseName(newExerciseId)
+
+    const updatedEntries = workout.entries.map((e, i) =>
+      i !== entryIdx ? e : { ...e, exerciseId: newExerciseId, aiNotes: undefined },
+    )
+    const updated: Workout = {
+      ...workout,
+      entries: updatedEntries,
+      feedback: [
+        ...(workout.feedback ?? []),
+        { source: 'user' as const, note: `Swapped ${oldName} → ${newName}`, timestamp: new Date().toISOString() },
+      ],
+    }
+    setSwapTarget(null)
+    setWorkouts((prev) => prev.map((w) => (w.id === workoutId ? updated : w)))
+    await persistWorkout(updated)
+  }
+
   return (
     <div className="screen-content">
       <div className="today-header">
@@ -473,7 +502,17 @@ export default function Today() {
 
               {(workout.entries ?? []).map((entry, entryIdx) => (
                 <div key={`${entry.exerciseId}-${entryIdx}`} className="today-entry">
-                  <div className="today-entry-name"><ExerciseTip exerciseId={entry.exerciseId} /></div>
+                  <div className="today-entry-name">
+                    <ExerciseTip exerciseId={entry.exerciseId} />
+                    {editingWorkoutId === workout.id && !isEntryInProgress(entry) && workout.id && (
+                      <button
+                        className="today-swap-btn"
+                        onClick={() => setSwapTarget({ workoutId: workout.id as number, entryIdx, exerciseId: entry.exerciseId })}
+                      >
+                        ⇄ Swap
+                      </button>
+                    )}
+                  </div>
                   {entry.sets.map((set, setIdx) => {
                     const isEditing = editingWorkoutId === workout.id && !isSetCompleted(set)
                     return (
@@ -698,6 +737,14 @@ export default function Today() {
           )
         })}
       </div>
+
+      {swapTarget && (
+        <ExercisePicker
+          currentExerciseId={swapTarget.exerciseId}
+          onSelect={(newId) => swapExercise(swapTarget.workoutId, swapTarget.entryIdx, newId)}
+          onClose={() => setSwapTarget(null)}
+        />
+      )}
     </div>
   )
 }

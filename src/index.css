@@ -331,6 +331,9 @@ html, body {
 }
 
 .today-entry-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 0.86rem;
   font-weight: 600;
   margin-bottom: 7px;
@@ -564,6 +567,140 @@ html, body {
 
 .today-set-label--locked {
   opacity: 0.45;
+}
+
+.today-swap-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  padding: 2px 7px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.today-swap-btn:active {
+  background: var(--bg-elevated);
+}
+
+/* ─── ExercisePicker ─────────────────────────────────────────────────── */
+
+.exercise-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+}
+
+.exercise-picker-modal {
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  border-radius: 16px 16px 0 0;
+  width: 100%;
+  max-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.exercise-picker-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px 8px;
+}
+
+.exercise-picker-search {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.9rem;
+  padding: 8px 10px;
+}
+
+.exercise-picker-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.exercise-picker-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 4px 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.exercise-picker-filter {
+  display: flex;
+  gap: 6px;
+  padding: 0 14px 8px;
+}
+
+.exercise-picker-filter-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  padding: 3px 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.exercise-picker-filter-btn.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.exercise-picker-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0 env(safe-area-inset-bottom, 0);
+}
+
+.exercise-picker-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  padding: 12px 16px;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.exercise-picker-item:active {
+  background: var(--bg);
+}
+
+.exercise-picker-item-name {
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.exercise-picker-item-tags {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.exercise-picker-empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  padding: 20px 16px;
 }
 
 .today-delete-btn {
