@@ -16,6 +16,7 @@ import {
   getGoals,
   saveGoals,
   saveWorkout,
+  getWorkoutById,
   saveConversation,
   listConversations,
   listWorkouts,
@@ -31,6 +32,7 @@ import type { Exercise } from '../data/exercises.ts'
 import {
   GoalsSchema,
   WorkoutSchema,
+  isSetCompleted,
 } from '../lib/schemas/index.ts'
 import type {
   Goals,
@@ -52,6 +54,7 @@ import {
   ADD_EXERCISE_TOOL,
   REMOVE_EXERCISE_TOOL,
   DELETE_FUTURE_WORKOUTS_TOOL,
+  EDIT_WORKOUT_TOOL,
   looksLikeFakeToolNarration,
   addDays,
   getToolSchemaHint,
@@ -230,6 +233,47 @@ export default function Chat({ onStreamingChange }: ChatProps) {
       return `Removed exercise "${exec.id}" from your catalog.`
     }
 
+    if (exec.kind === 'edit_workout') {
+      const workout = await getWorkoutById(exec.workoutId)
+      if (!workout) throw new Error(`Workout ${exec.workoutId} not found`)
+      if (workout.status === 'completed') throw new Error(`Workout ${exec.workoutId} is completed and cannot be edited`)
+
+      let updatedEntries = workout.entries ? [...workout.entries] : []
+      for (const entryPatch of exec.patches.entries ?? []) {
+        const entry = updatedEntries[entryPatch.entryIndex]
+        if (!entry) throw new Error(`Entry index ${entryPatch.entryIndex} not found`)
+        let updatedSets = [...entry.sets]
+        for (const setPatch of entryPatch.sets ?? []) {
+          const set = updatedSets[setPatch.setIndex]
+          if (!set) throw new Error(`Set index ${setPatch.setIndex} not found in entry ${entryPatch.entryIndex}`)
+          if (isSetCompleted(set)) throw new Error(`Set ${setPatch.setIndex} in entry ${entryPatch.entryIndex} already has difficulty logged`)
+          updatedSets = [
+            ...updatedSets.slice(0, setPatch.setIndex),
+            {
+              ...set,
+              ...(setPatch.plannedReps !== undefined ? { plannedReps: setPatch.plannedReps } : {}),
+              ...(setPatch.plannedWeight !== undefined ? { plannedWeight: setPatch.plannedWeight } : {}),
+              ...(setPatch.targetSeconds !== undefined ? { targetSeconds: setPatch.targetSeconds } : {}),
+            },
+            ...updatedSets.slice(setPatch.setIndex + 1),
+          ]
+        }
+        updatedEntries = [
+          ...updatedEntries.slice(0, entryPatch.entryIndex),
+          { ...entry, sets: updatedSets },
+          ...updatedEntries.slice(entryPatch.entryIndex + 1),
+        ]
+      }
+
+      const updated = {
+        ...workout,
+        entries: updatedEntries,
+        ...(exec.patches.workoutType !== undefined ? { workoutType: exec.patches.workoutType } : {}),
+      }
+      await saveWorkout(updated)
+      return 'Updated successfully.'
+    }
+
     const allWorkouts = await listWorkouts(10000)
     const today = getToday()
 
@@ -312,7 +356,7 @@ export default function Chat({ onStreamingChange }: ChatProps) {
       currentMode === 'onboarding' || currentMode === 'goal_review'
         ? [PROPOSE_GOALS_TOOL]
         : currentMode === 'planning'
-          ? [PROPOSE_WORKOUT_TOOL, DELETE_FUTURE_WORKOUTS_TOOL, ADD_EXERCISE_TOOL, REMOVE_EXERCISE_TOOL]
+          ? [PROPOSE_WORKOUT_TOOL, EDIT_WORKOUT_TOOL, DELETE_FUTURE_WORKOUTS_TOOL, ADD_EXERCISE_TOOL, REMOVE_EXERCISE_TOOL]
           : []
 
     await streamChat({
@@ -390,6 +434,24 @@ export default function Chat({ onStreamingChange }: ChatProps) {
                   content: outcome,
                   toolCallId: tc.id,
                 },
+              ]
+              if (resolved.execution.kind === 'edit_workout') {
+                // Add a hidden nudge so the model describes what it changed
+                const threadWithNudge: Message[] = [
+                  ...finalMessages,
+                  {
+                    role: 'user',
+                    hidden: true,
+                    content: 'The edit was applied. In one sentence, confirm to the user what you just changed.',
+                  },
+                ]
+                setMessages(finalMessages)
+                const savedConv = await persistConv(threadWithNudge, currentConv, currentMode)
+                await doStream(threadWithNudge, savedConv, currentMode, currentGoals, currentModel, currentCustomExercises)
+                return
+              }
+              finalMessages = [
+                ...finalMessages,
                 {
                   role: 'assistant',
                   content: outcome,

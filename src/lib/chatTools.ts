@@ -88,6 +88,54 @@ export const REMOVE_EXERCISE_TOOL = {
   },
 }
 
+export const EDIT_WORKOUT_TOOL = {
+  name: 'edit_workout',
+  description:
+    'Patch the planned values (reps, weight, duration) of sets in an existing uncompleted workout. ' +
+    'Cannot edit sets that already have difficulty logged, or workouts with status "completed". ' +
+    'Use delete_future_workouts + propose_workout to replace an entire workout instead.',
+  parameters: {
+    type: 'object',
+    properties: {
+      workoutId: {
+        type: 'integer',
+        description: 'The numeric id of the workout to edit.',
+      },
+      patches: {
+        type: 'object',
+        description: 'Fields to update on the workout.',
+        properties: {
+          workoutType: { type: 'string' },
+          entries: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                entryIndex: { type: 'integer', description: 'Zero-based index into workout.entries.' },
+                sets: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      setIndex: { type: 'integer', description: 'Zero-based index into entry.sets.' },
+                      plannedReps: { type: 'integer' },
+                      plannedWeight: { type: 'number' },
+                      targetSeconds: { type: 'integer' },
+                    },
+                    required: ['setIndex'],
+                  },
+                },
+              },
+              required: ['entryIndex'],
+            },
+          },
+        },
+      },
+    },
+    required: ['workoutId', 'patches'],
+  },
+}
+
 export const DELETE_FUTURE_WORKOUTS_TOOL = {
   name: 'delete_future_workouts',
   description:
@@ -115,6 +163,21 @@ export type ToolCardState =
   | { kind: 'workouts'; workouts: ProposeWorkoutsPayload }
   | { kind: 'error'; toolName: string; message: string }
 
+export type EditWorkoutSetPatch = {
+  setIndex: number
+  plannedReps?: number
+  plannedWeight?: number
+  targetSeconds?: number
+}
+
+export type EditWorkoutPatches = {
+  workoutType?: string
+  entries?: Array<{
+    entryIndex: number
+    sets?: EditWorkoutSetPatch[]
+  }>
+}
+
 export type ToolExecution =
   | {
       kind: 'delete_future_workouts'
@@ -124,6 +187,7 @@ export type ToolExecution =
     }
   | { kind: 'add_exercise'; exercise: Exercise }
   | { kind: 'remove_exercise'; id: string }
+  | { kind: 'edit_workout'; workoutId: number; patches: EditWorkoutPatches }
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -480,6 +544,44 @@ export function resolveToolCall(tc: PendingTool, customExerciseIds: Set<string> 
       }
     } catch {
       return { kind: 'error', message: 'Failed to parse delete request', toolName: tc.name }
+    }
+  }
+  if (tc.name === 'edit_workout') {
+    try {
+      const raw = JSON.parse(tc.arguments) as unknown
+      const p = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+      const workoutId = typeof p.workoutId === 'number' && Number.isInteger(p.workoutId) && p.workoutId > 0
+        ? p.workoutId
+        : undefined
+      if (!workoutId) {
+        return { kind: 'error', message: 'edit_workout: workoutId must be a positive integer', toolName: tc.name }
+      }
+      const patchesRaw = (p.patches && typeof p.patches === 'object' ? p.patches : {}) as Record<string, unknown>
+      const patches: EditWorkoutPatches = {}
+      if (typeof patchesRaw.workoutType === 'string') patches.workoutType = patchesRaw.workoutType
+      if (Array.isArray(patchesRaw.entries)) {
+        patches.entries = patchesRaw.entries
+          .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+          .map((e) => ({
+            entryIndex: typeof e.entryIndex === 'number' ? Math.round(e.entryIndex) : 0,
+            sets: Array.isArray(e.sets)
+              ? (e.sets as Record<string, unknown>[])
+                  .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
+                  .map((s) => {
+                    const patch: EditWorkoutSetPatch = {
+                      setIndex: typeof s.setIndex === 'number' ? Math.round(s.setIndex) : 0,
+                    }
+                    if (typeof s.plannedReps === 'number' && s.plannedReps > 0) patch.plannedReps = Math.round(s.plannedReps)
+                    if (typeof s.plannedWeight === 'number' && s.plannedWeight >= 0) patch.plannedWeight = s.plannedWeight
+                    if (typeof s.targetSeconds === 'number' && s.targetSeconds > 0) patch.targetSeconds = Math.round(s.targetSeconds)
+                    return patch
+                  })
+              : undefined,
+          }))
+      }
+      return { kind: 'execute', execution: { kind: 'edit_workout', workoutId, patches } }
+    } catch {
+      return { kind: 'error', message: 'Failed to parse edit_workout arguments', toolName: tc.name }
     }
   }
   // Unknown tool — auto-error so input never deadlocks

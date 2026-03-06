@@ -125,6 +125,16 @@ export function isWorkoutCompleted(workout: Workout): boolean {
   return getWorkoutStatus(workout) !== 'not_started'
 }
 
+/** True if the set's planned values are frozen (difficulty already logged). */
+export function isSetCompleted(set: WorkoutSet): boolean {
+  return set.difficulty !== undefined
+}
+
+/** True if any set in the entry has been logged — blocks exercise swapping. */
+export function isEntryInProgress(entry: WorkoutEntry): boolean {
+  return entry.sets.some((s) => s.difficulty !== undefined)
+}
+
 /**
  * What the AI returns in a propose_workout tool call — one workout in the array.
  * Stricter than WorkoutSchema:
