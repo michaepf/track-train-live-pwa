@@ -8,6 +8,8 @@
   --bg: #1a1a1a;
   --bg-surface: #2a2a2a;
   --bg-raised: #333;
+  --bg-elevated: #2a2a2a;
+  --text-secondary: #ccc;
   --border: #444;
   --text: #f0f0f0;
   --text-muted: #999;
@@ -570,10 +572,10 @@ html, body {
 }
 
 .today-swap-btn {
-  background: none;
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: 0.72rem;
   padding: 2px 7px;
   cursor: pointer;

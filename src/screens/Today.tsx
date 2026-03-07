@@ -340,9 +340,6 @@ export default function Today() {
     <div className="screen-content">
       <div className="today-header">
         <h1>Today</h1>
-        <button className="workouts-refresh-btn" onClick={loadToday} disabled={loading}>
-          {loading ? 'Loading...' : 'Refresh'}
-        </button>
       </div>
       <div className="today-date-nav">
         <button className="today-nav-btn" onClick={() => setViewDate((d) => addDays(d, -1))}>‹</button>
