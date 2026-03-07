@@ -481,6 +481,12 @@ html, body {
   cursor: default;
 }
 
+.today-complete-btn--done {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
 @keyframes today-spin {
   to { transform: rotate(360deg); }
 }

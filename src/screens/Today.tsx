@@ -141,6 +141,15 @@ export default function Today() {
     void persistWorkout(updated)
   }
 
+  function unCompleteWorkout(workoutId: number) {
+    if (!window.confirm('Mark this workout as incomplete?')) return
+    const workout = workouts.find((w) => w.id === workoutId)
+    if (!workout) return
+    const updated: Workout = { ...workout, status: undefined, completedAt: undefined }
+    setWorkouts((prev) => prev.map((w) => (w.id === workoutId ? updated : w)))
+    void persistWorkout(updated)
+  }
+
   function updateEntryNote(workoutId: number, entryIdx: number, value: string) {
     const workout = workouts.find((w) => w.id === workoutId)
     if (!workout || !workout.entries) return
@@ -723,11 +732,15 @@ export default function Today() {
 
               <div className="today-complete-row">
                 <button
-                  className="today-complete-btn"
-                  onClick={() => workout.id && markWorkoutComplete(workout.id)}
-                  disabled={!workout.id || manuallyCompleted || saveState === 'saving'}
+                  className={`today-complete-btn${manuallyCompleted ? ' today-complete-btn--done' : ''}`}
+                  onClick={() => {
+                    if (!workout.id) return
+                    if (manuallyCompleted) unCompleteWorkout(workout.id)
+                    else markWorkoutComplete(workout.id)
+                  }}
+                  disabled={!workout.id || saveState === 'saving'}
                 >
-                  {status === 'completed' ? 'Workout complete' : 'Complete workout'}
+                  {manuallyCompleted ? 'Workout complete ✓' : 'Complete workout'}
                 </button>
               </div>
             </section>
