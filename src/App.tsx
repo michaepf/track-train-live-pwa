@@ -156,6 +156,7 @@ export default function App() {
   const [callbackError, setCallbackError] = useState<string | null>(null)
   const [screen, setScreen] = useState<ScreenId>('chat')
   const [chatStreaming, setChatStreaming] = useState(false)
+  const [chatHasUnread, setChatHasUnread] = useState(false)
   const [showFirstTimeModal, setShowFirstTimeModal] = useState(false)
   const [chatSeedMessage, setChatSeedMessage] = useState<string | null>(null)
 
@@ -222,14 +223,7 @@ export default function App() {
 
   function handleTabChange(nextScreen: ScreenId) {
     if (nextScreen === screen) return
-
-    if (screen === 'chat' && chatStreaming) {
-      const shouldLeave = window.confirm(
-        'Are you sure you want to change tabs? The agent is still developing a reply.',
-      )
-      if (!shouldLeave) return
-    }
-
+    if (nextScreen === 'chat') setChatHasUnread(false)
     setScreen(nextScreen)
   }
 
@@ -240,20 +234,10 @@ export default function App() {
 
   function renderActiveScreen() {
     switch (screen) {
-      case 'today':
-        return <Today onRequestChat={(msg) => { setChatSeedMessage(msg); setScreen('chat') }} />
-      case 'workout':
-        return <Workout />
-      case 'chat':
-        return <Chat
-          onStreamingChange={setChatStreaming}
-          seedMessage={chatSeedMessage ?? undefined}
-          onSeedConsumed={() => setChatSeedMessage(null)}
-        />
-      case 'history':
-        return <History />
-      case 'settings':
-        return <Settings />
+      case 'today':    return <Today onRequestChat={(msg) => { setChatSeedMessage(msg); setScreen('chat') }} />
+      case 'workout':  return <Workout />
+      case 'history':  return <History />
+      case 'settings': return <Settings />
     }
   }
 
@@ -274,7 +258,16 @@ export default function App() {
       <ApiKeyContext.Provider value={apiKey}>
         <div className="app">
           <main className="screen">
-            {renderActiveScreen()}
+            <div style={screen !== 'chat' ? { display: 'none' } : undefined}>
+              <Chat
+                isActive={screen === 'chat'}
+                onStreamingChange={setChatStreaming}
+                onNewResponse={() => setChatHasUnread(true)}
+                seedMessage={chatSeedMessage ?? undefined}
+                onSeedConsumed={() => setChatSeedMessage(null)}
+              />
+            </div>
+            {screen !== 'chat' && renderActiveScreen()}
           </main>
           <nav className="tab-bar">
             {SCREENS.map((s) => (
@@ -283,7 +276,12 @@ export default function App() {
                 className={`tab ${screen === s.id ? 'tab--active' : ''}`}
                 onClick={() => handleTabChange(s.id)}
               >
-                <span className="tab__icon">{s.icon}</span>
+                <span className="tab__icon">
+                  {s.icon}
+                  {s.id === 'chat' && (chatHasUnread || (chatStreaming && screen !== 'chat')) && (
+                    <span className={`tab__dot${chatHasUnread ? '' : ' tab__dot--working'}`} />
+                  )}
+                </span>
                 <span className="tab__label">{s.label}</span>
               </button>
             ))}

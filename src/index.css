@@ -953,6 +953,27 @@ html, body {
 .tab__icon {
   font-size: 1.3rem;
   line-height: 1;
+  position: relative;
+}
+
+.tab__dot {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+@keyframes tab-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.7); }
+}
+
+.tab__dot--working {
+  background: var(--text-muted);
+  animation: tab-dot-pulse 2.4s ease-in-out infinite;
 }
 
 .tab__label {

@@ -155,11 +155,13 @@ function MessageBubble({ message }: { message: Message }) {
 
 interface ChatProps {
   onStreamingChange?: (streaming: boolean) => void
+  onNewResponse?: () => void
+  isActive?: boolean
   seedMessage?: string
   onSeedConsumed?: () => void
 }
 
-export default function Chat({ onStreamingChange, seedMessage, onSeedConsumed }: ChatProps) {
+export default function Chat({ onStreamingChange, onNewResponse, isActive = true, seedMessage, onSeedConsumed }: ChatProps) {
   const apiKey = useApiKey()
 
   const [goals, setGoals] = useState<Goals | null>(null)
@@ -187,6 +189,7 @@ export default function Chat({ onStreamingChange, seedMessage, onSeedConsumed }:
   const bottomRef = useRef<HTMLDivElement>(null)
   // Capture seed on mount — survives the prop being cleared by onSeedConsumed
   const seedMessageRef = useRef<string | null>(seedMessage ?? null)
+  const isActiveRef = useRef(isActive)
   const fakeToolRetryRef = useRef(0)
   const toolValidationRetryRef = useRef(0)
 
@@ -244,6 +247,10 @@ export default function Chat({ onStreamingChange, seedMessage, onSeedConsumed }:
   useEffect(() => {
     onStreamingChange?.(streaming)
   }, [streaming, onStreamingChange])
+
+  useEffect(() => {
+    isActiveRef.current = isActive
+  }, [isActive])
 
   // Notify App that the seed message has been consumed so it isn't re-applied on next mount.
   useEffect(() => {
@@ -567,6 +574,7 @@ export default function Chat({ onStreamingChange, seedMessage, onSeedConsumed }:
       onDone: async (result: StreamResult) => {
         setStreamingContent('')
         setStreaming(false)
+        if (!isActiveRef.current) onNewResponse?.()
 
         if (result.toolCall) {
           fakeToolRetryRef.current = 0
