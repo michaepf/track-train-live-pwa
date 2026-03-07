@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { streamChat, MODELS } from '../lib/api.ts'
 import type { ModelTier } from '../lib/api.ts'
-import { EXERCISE_MAP, getExerciseName, registerCustomExercises } from '../data/exercises.ts'
+import { getExerciseName, registerExerciseCatalog } from '../data/exercises.ts'
 import {
   buildSystemPrompt,
   buildHistoryContext,
@@ -334,22 +334,28 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
 
   async function executeToolAction(exec: ToolExecution): Promise<string> {
     if (exec.kind === 'add_exercise') {
+      // Duplicate check — ID collision
+      if (customExercises.some((e) => e.id === exec.exercise.id)) {
+        return `Exercise with id "${exec.exercise.id}" already exists in the catalog.`
+      }
+      // Duplicate check — name collision (case-insensitive)
+      const nameLower = exec.exercise.name.toLowerCase()
+      const nameMatch = customExercises.find((e) => e.name.toLowerCase() === nameLower)
+      if (nameMatch) {
+        return `An exercise called "${nameMatch.name}" already exists (id: ${nameMatch.id}). Use that id instead of adding a duplicate.`
+      }
       await saveCustomExercise(exec.exercise)
       const updated = await getCustomExercises()
       setCustomExercises(updated)
-      registerCustomExercises(updated)
+      registerExerciseCatalog(updated)
       return `Added exercise "${exec.exercise.name}" (${exec.exercise.id}) to your catalog.`
     }
 
     if (exec.kind === 'remove_exercise') {
-      // Silently no-op if it's a built-in exercise
-      if (exec.id in EXERCISE_MAP) {
-        return `"${exec.id}" is a built-in exercise and cannot be removed.`
-      }
       await deleteCustomExercise(exec.id)
       const updated = await getCustomExercises()
       setCustomExercises(updated)
-      registerCustomExercises(updated)
+      registerExerciseCatalog(updated)
       return `Removed exercise "${exec.id}" from your catalog.`
     }
 
@@ -435,8 +441,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
       if (isEntryInProgress(entry)) {
         throw new Error(`Entry ${exec.entryIndex} already has progress and cannot be swapped`)
       }
-      const isKnownExercise =
-        exec.toExerciseId in EXERCISE_MAP || customExercises.some((e) => e.id === exec.toExerciseId)
+      const isKnownExercise = customExercises.some((e) => e.id === exec.toExerciseId)
       if (!isKnownExercise) {
         throw new Error(`Unknown exerciseId: ${exec.toExerciseId}`)
       }

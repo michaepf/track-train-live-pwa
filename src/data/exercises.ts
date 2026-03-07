@@ -193,35 +193,37 @@ export const EXERCISE_MAP: Record<string, string> = Object.fromEntries(
   EXERCISES.map((e) => [e.id, e.name]),
 )
 
-/** Runtime name lookup for user-added custom exercises. Populated via registerCustomExercises(). */
-let customExerciseMap: Record<string, string> = {}
+/** Runtime catalog map. Populated via registerExerciseCatalog() on boot and after any change. */
+let runtimeCatalog: Record<string, Exercise> = {}
 
 /**
- * Registers the current set of custom exercises so getExerciseName() can resolve them.
- * Call on app startup after loading from IndexedDB, and after any add/remove.
+ * Registers the full unified exercise catalog so getExerciseName() and getExercise()
+ * can resolve IDs at runtime. Call on app startup and after any add/remove.
  */
-export function registerCustomExercises(exercises: Exercise[]): void {
-  customExerciseMap = Object.fromEntries(exercises.map((e) => [e.id, e.name]))
+export function registerExerciseCatalog(exercises: Exercise[]): void {
+  runtimeCatalog = Object.fromEntries(exercises.map((e) => [e.id, e]))
+}
+
+/** Returns the full Exercise record for an ID, or undefined if not found. */
+export function getExercise(id: string): Exercise | undefined {
+  return runtimeCatalog[id]
 }
 
 /**
  * Returns the display name for an exercise ID.
- * Checks custom exercises first, then built-ins, then humanizes the slug.
+ * Checks the runtime catalog first, then falls back to humanizing the slug.
  */
 export function getExerciseName(id: string): string {
   return (
-    customExerciseMap[id] ??
-    EXERCISE_MAP[id] ??
+    runtimeCatalog[id]?.name ??
     id.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
   )
 }
 
 /**
  * Compact catalog listing for injection into the AI system prompt.
- * Always includes built-in exercises. Custom exercises are appended if provided.
  */
-export function buildCatalogPromptSection(customExercises: Exercise[] = []): string {
-  const catalog = [...EXERCISES, ...customExercises]
+export function buildCatalogPromptSection(catalog: Exercise[]): string {
   const lines = catalog.map((e) => `  ${e.id}`)
   return [
     '## Exercise Catalog',

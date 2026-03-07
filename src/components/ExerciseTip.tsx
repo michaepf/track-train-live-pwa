@@ -1,8 +1,5 @@
 import { useState } from 'react'
-import { EXERCISES, getExerciseName } from '../data/exercises.ts'
-
-type ExerciseInfo = (typeof EXERCISES)[number]
-const INFO_MAP = Object.fromEntries(EXERCISES.map((e) => [e.id, e])) as Record<string, ExerciseInfo>
+import { getExercise, getExerciseName } from '../data/exercises.ts'
 
 interface ExerciseTipProps {
   exerciseId: string
@@ -10,7 +7,7 @@ interface ExerciseTipProps {
 
 export default function ExerciseTip({ exerciseId }: ExerciseTipProps) {
   const [open, setOpen] = useState(false)
-  const info = INFO_MAP[exerciseId]
+  const info = getExercise(exerciseId)
   const name = info?.name ?? getExerciseName(exerciseId)
 
   if (!info) {

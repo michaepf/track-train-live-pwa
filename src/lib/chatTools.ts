@@ -3,7 +3,6 @@
  * No React dependencies. Extracted from Chat.tsx for modularity.
  */
 
-import { EXERCISE_MAP } from '../data/exercises.ts'
 import type { Exercise } from '../data/exercises.ts'
 import { ProposeGoalsPayloadSchema, ProposeWorkoutsPayloadSchema } from './schemas/index.ts'
 import type { ProposeWorkoutsPayload } from './schemas/index.ts'
@@ -62,7 +61,7 @@ export const PROPOSE_WORKOUT_TOOL = {
 export const ADD_EXERCISE_TOOL = {
   name: 'add_exercise',
   description:
-    'Add a new exercise to the user\'s custom exercise catalog. Use when the user asks to add an exercise not in the built-in list, or when you need an exercise that does not exist yet.',
+    'Add a new exercise to the user\'s exercise catalog. Use only when the exercise does not already exist in the catalog — check before adding to avoid duplicates.',
   parameters: {
     type: 'object',
     properties: {
@@ -78,7 +77,7 @@ export const ADD_EXERCISE_TOOL = {
 export const REMOVE_EXERCISE_TOOL = {
   name: 'remove_exercise',
   description:
-    'Remove a custom exercise from the user\'s catalog. Cannot remove built-in exercises — those are permanent.',
+    'Remove an exercise from the user\'s catalog. The exercise will be permanently deleted and will not return on app restart.',
   parameters: {
     type: 'object',
     properties: {
@@ -460,7 +459,7 @@ function validateExerciseIds(workouts: ProposeWorkoutsPayload, customIds: Set<st
   const unknown: string[] = []
   for (const workout of workouts) {
     for (const entry of workout.entries ?? []) {
-      if (!(entry.exerciseId in EXERCISE_MAP) && !customIds.has(entry.exerciseId)) {
+      if (!customIds.has(entry.exerciseId)) {
         unknown.push(entry.exerciseId)
       }
     }

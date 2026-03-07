@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { EXERCISES } from '../data/exercises.ts'
 import type { Exercise } from '../data/exercises.ts'
 import { getCustomExercises } from '../lib/db.ts'
 
@@ -20,10 +19,10 @@ export default function ExercisePicker({ currentExerciseId, onSelect, onClose }:
     searchRef.current?.focus()
   }, [])
 
-  const current = EXERCISES.find((e) => e.id === currentExerciseId)
+  const current = customExercises.find((e) => e.id === currentExerciseId)
   const currentTags = current?.tags ?? []
 
-  const allExercises = [...EXERCISES, ...customExercises]
+  const allExercises = customExercises
 
   const filtered = allExercises.filter((ex) => {
     if (!ex?.id || !ex?.name) return false

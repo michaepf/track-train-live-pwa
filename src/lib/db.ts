@@ -279,9 +279,87 @@ export async function deleteSetting(key: string): Promise<void> {
   )
 }
 
-// ─── Custom Exercises ──────────────────────────────────────────────────────────
+// ─── Exercise Catalog ─────────────────────────────────────────────────────────
 
-/** Returns all custom exercises sorted by name. */
+const SETTING_SEEDED_IDS = 'seededExerciseIds'
+
+/**
+ * Syncs built-in seed exercises into the catalog store on every boot.
+ *
+ * - Only inserts IDs that have never been seeded before (tracked in settings).
+ * - IDs that were seeded previously but are now absent from the store were
+ *   deliberately deleted (e.g. "remove dumbbell press, shoulder injury") — leave them alone.
+ * - If a new seed ID collides with an existing custom exercise, skip the write
+ *   but mark it as seeded so we don't attempt it again.
+ * - On corrupt/missing settings key: derives initial seen-set from whichever
+ *   seed IDs already exist in the store, to avoid re-inserting deleted exercises.
+ * - Returns the full active catalog after sync.
+ */
+export async function syncSeedExercises(): Promise<Exercise[]> {
+  const { EXERCISES } = await import('../data/exercises.ts')
+  const db = await getDB()
+
+  // Load the seen-set (IDs that have ever been seeded).
+  // On missing or corrupt key, derive from store contents so intentionally deleted
+  // exercises are not re-inserted (e.g. page closed before settings could be written).
+  const raw = await getSetting(SETTING_SEEDED_IDS)
+  let seenIds: Set<string>
+  let parsedSeenIds: Set<string> | null = null
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (Array.isArray(parsed)) parsedSeenIds = new Set(parsed as string[])
+    } catch { /* corrupt — treat as missing */ }
+  }
+  if (parsedSeenIds !== null) {
+    seenIds = parsedSeenIds
+  } else {
+    // Missing or corrupt key — derive from whichever seed IDs already exist in the store
+    // so intentionally deleted exercises are not re-inserted on the next boot.
+    const existing: unknown[] = await idbReq(
+      db.transaction('customExercises', 'readonly').objectStore('customExercises').getAll(),
+    )
+    const existingIds = new Set((existing as Exercise[]).map((e) => e.id))
+    seenIds = new Set(EXERCISES.filter((e) => existingIds.has(e.id)).map((e) => e.id))
+    // Persist immediately so future boots don't repeat the derivation
+    await setSetting(SETTING_SEEDED_IDS, JSON.stringify([...seenIds]))
+  }
+
+  const toAdd = EXERCISES.filter((e) => !seenIds.has(e.id))
+  if (toAdd.length > 0) {
+    const tx = db.transaction('customExercises', 'readwrite')
+    const store = tx.objectStore('customExercises')
+    for (const ex of toAdd) {
+      const existing = await idbReq(store.get(ex.id))
+      if (!existing) {
+        await idbReq(store.put(ex, ex.id))
+      }
+      seenIds.add(ex.id)
+    }
+    await setSetting(SETTING_SEEDED_IDS, JSON.stringify([...seenIds]))
+  }
+
+  return getCustomExercises()
+}
+
+/**
+ * Restores all built-in seed exercises to the catalog (escape hatch).
+ * Overwrites any modifications to seeded entries and resets the seen-set.
+ * Use from Settings UI or via the restore_exercise_catalog AI tool.
+ */
+export async function restoreExerciseCatalog(): Promise<Exercise[]> {
+  const { EXERCISES } = await import('../data/exercises.ts')
+  const db = await getDB()
+  const tx = db.transaction('customExercises', 'readwrite')
+  const store = tx.objectStore('customExercises')
+  for (const ex of EXERCISES) {
+    await idbReq(store.put(ex, ex.id))
+  }
+  await setSetting(SETTING_SEEDED_IDS, JSON.stringify(EXERCISES.map((e) => e.id)))
+  return getCustomExercises()
+}
+
+/** Returns all exercises in the catalog sorted by name. */
 export async function getCustomExercises(): Promise<Exercise[]> {
   const db = await getDB()
   const results: unknown[] = await idbReq(

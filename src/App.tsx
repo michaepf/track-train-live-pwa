@@ -8,8 +8,8 @@ import {
   startLogin,
   AuthError,
 } from './lib/auth.ts'
-import { getCustomExercises, getWorkoutsByDate, listWorkouts, getSetting, setSetting } from './lib/db.ts'
-import { registerCustomExercises } from './data/exercises.ts'
+import { syncSeedExercises, getWorkoutsByDate, listWorkouts, getSetting, setSetting } from './lib/db.ts'
+import { registerExerciseCatalog } from './data/exercises.ts'
 import { getToday } from './lib/context.ts'
 import Chat from './screens/Chat.tsx'
 import Today from './screens/Today.tsx'
@@ -171,6 +171,8 @@ export default function App() {
           window.history.replaceState({}, '', window.location.pathname)
           const key = await getApiKey()
           setApiKey(key ?? '')
+          // Seed and register catalog before mounting Chat so validation has the full list
+          await syncSeedExercises().then(registerExerciseCatalog).catch(() => {})
           setScreen('chat')
           setAuthState('authenticated')
           // Show first-time modal for new users
@@ -202,8 +204,8 @@ export default function App() {
           return
         }
         setApiKey(key)
-        // Register custom exercises so getExerciseName() resolves them in all screens
-        getCustomExercises().then(registerCustomExercises).catch(() => {})
+        // Seed and register catalog before mounting screens so validation has the full list
+        await syncSeedExercises().then(registerExerciseCatalog).catch(() => {})
         // Smart default screen: Today > Workouts > Chat
         const today = getToday()
         const todayWorkouts = await getWorkoutsByDate(today).catch(() => [])
