@@ -157,6 +157,7 @@ export default function App() {
   const [screen, setScreen] = useState<ScreenId>('chat')
   const [chatStreaming, setChatStreaming] = useState(false)
   const [showFirstTimeModal, setShowFirstTimeModal] = useState(false)
+  const [chatSeedMessage, setChatSeedMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (isCallbackUrl()) {
@@ -240,11 +241,15 @@ export default function App() {
   function renderActiveScreen() {
     switch (screen) {
       case 'today':
-        return <Today />
+        return <Today onRequestChat={(msg) => { setChatSeedMessage(msg); setScreen('chat') }} />
       case 'workout':
         return <Workout />
       case 'chat':
-        return <Chat onStreamingChange={setChatStreaming} />
+        return <Chat
+          onStreamingChange={setChatStreaming}
+          seedMessage={chatSeedMessage ?? undefined}
+          onSeedConsumed={() => setChatSeedMessage(null)}
+        />
       case 'history':
         return <History />
       case 'settings':

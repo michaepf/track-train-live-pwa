@@ -264,6 +264,34 @@ html, body {
   padding: 10px 12px;
 }
 
+/* ─── Fireworks ──────────────────────────────────────────────────────────── */
+
+.fireworks-overlay {
+  position: fixed;
+  top: 40%;
+  left: 50%;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+.fireworks-burst {
+  position: absolute;
+  transform: translate(calc(-50% + var(--bx)), calc(-50% + var(--by)));
+}
+
+@keyframes firework-particle {
+  0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0); opacity: 0; }
+}
+
+.fireworks-particle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 50%;
+  animation: firework-particle 0.7s ease-out forwards;
+}
+
 .today-workout-header {
   display: flex;
   align-items: center;
@@ -1944,4 +1972,26 @@ html, body {
 
 .modal-btn:active {
   background: var(--accent-dim);
+}
+
+.modal-btn--secondary {
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+
+.modal-btn--secondary:active {
+  background: var(--border);
+}
+
+.debrief-modal-subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-top: 4px;
+}
+
+.debrief-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
 }

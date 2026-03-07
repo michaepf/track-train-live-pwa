@@ -155,9 +155,11 @@ function MessageBubble({ message }: { message: Message }) {
 
 interface ChatProps {
   onStreamingChange?: (streaming: boolean) => void
+  seedMessage?: string
+  onSeedConsumed?: () => void
 }
 
-export default function Chat({ onStreamingChange }: ChatProps) {
+export default function Chat({ onStreamingChange, seedMessage, onSeedConsumed }: ChatProps) {
   const apiKey = useApiKey()
 
   const [goals, setGoals] = useState<Goals | null>(null)
@@ -183,6 +185,8 @@ export default function Chat({ onStreamingChange }: ChatProps) {
 
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  // Capture seed on mount — survives the prop being cleared by onSeedConsumed
+  const seedMessageRef = useRef<string | null>(seedMessage ?? null)
   const fakeToolRetryRef = useRef(0)
   const toolValidationRetryRef = useRef(0)
 
@@ -241,6 +245,35 @@ export default function Chat({ onStreamingChange }: ChatProps) {
     onStreamingChange?.(streaming)
   }, [streaming, onStreamingChange])
 
+  // Notify App that the seed message has been consumed so it isn't re-applied on next mount.
+  useEffect(() => {
+    if (seedMessage) onSeedConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /**
+   * Captured once on mount — survives the prop being cleared by onSeedConsumed.
+   * Prepended as a hidden instruction on the first send when Chat is launched
+   * from the post-workout debrief modal.
+   */
+  const debriefInstructionRef = useRef<Message | null>(
+    seedMessage
+      ? {
+          role: 'user',
+          hidden: true,
+          content:
+            'The user just finished a workout and tapped "Talk to my trainer" from the completion screen. ' +
+            'Do NOT summarize or recap the workout — they just did it and already know what happened. ' +
+            'Acknowledge how it went in one sentence at most (e.g. "Solid session" or "Tough one with those failures"). ' +
+            'Then close with ONE specific, forward-looking question. Good examples: ' +
+            '"Want to look over your next session together?" or ' +
+            '"Anything specific you want me to adjust going forward?" ' +
+            'Do NOT ask vague questions like "How did it feel overall?" — be concrete and action-oriented. ' +
+            'Keep the entire response to 2–3 sentences max.',
+        }
+      : null,
+  )
+
   // Safety net: if pendingTool exists but no actionable goals card is visible,
   // clear pending state so input never stays locked.
   useEffect(() => {
@@ -267,6 +300,26 @@ export default function Chat({ onStreamingChange }: ChatProps) {
       doStream([], null, capturedMode, capturedGoals, capturedModel, customExercises)
     }
     // Intentionally omit doStream — stable within this effect's lifecycle
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialized])
+
+  // Auto-send seed message (e.g. post-workout debrief) once the thread is ready.
+  useEffect(() => {
+    const seed = seedMessageRef.current
+    if (!initialized || !seed || streaming || !model) return
+    seedMessageRef.current = null
+    const instruction = debriefInstructionRef.current
+    debriefInstructionRef.current = null
+    const userMsg: Message = { role: 'user', content: seed }
+    const thread: Message[] = instruction ? [instruction, userMsg] : [userMsg]
+    setMessages(thread)
+    const capturedGoals = goals
+    const capturedMode = mode
+    const capturedModel = model
+    persistConv(thread, conv, capturedMode).then((savedConv) => {
+      doStream(thread, savedConv, capturedMode, capturedGoals, capturedModel, customExercises)
+    })
+    // Intentionally omit doStream/persistConv — stable within this effect's lifecycle
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialized])
 
@@ -709,7 +762,10 @@ export default function Chat({ onStreamingChange }: ChatProps) {
     if (!text || streaming || pendingTool) return
 
     const userMsg: Message = { role: 'user', content: text }
-    const newThread = [...messages, userMsg]
+    // Prepend debrief instruction on the very first send from the post-workout modal, then clear it
+    const prefix: Message[] = debriefInstructionRef.current && messages.length === 0 ? [debriefInstructionRef.current] : []
+    debriefInstructionRef.current = null
+    const newThread = [...messages, ...prefix, userMsg]
     setMessages(newThread)
     setInput('')
     toolValidationRetryRef.current = 0
