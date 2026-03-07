@@ -769,6 +769,12 @@ html, body {
   margin-bottom: 6px;
 }
 
+.today-phase-cardio {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin: 0 0 6px;
+}
+
 .today-phase-notes {
   font-size: 0.84rem;
   color: var(--text-muted);

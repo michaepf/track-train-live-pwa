@@ -354,6 +354,10 @@ const TOOL_INSTRUCTIONS: Record<ConvMode, string> = {
 
 When proposing: call \`propose_workout\` with an array of 1–7 workout objects, each using a date from the D0–D6 planning window. Review "Existing Workouts in Planning Window" before proposing — append around existing sessions; do not duplicate them. Each strength exercise entry must include multiple set objects in the \`sets\` array (typically 3 sets), each with \`plannedReps\` and \`plannedWeight\` in lb. Always include a weight — use the most recent result from history, or a conservative beginner estimate if no history exists. Omit \`plannedWeight\` only for bodyweight-only or timed-hold exercises (e.g. plank, dead bug).
 
+Always include \`warmup\` and \`cooldown\` on every strength workout:
+- \`warmup\`: use \`{ cardio: { type, duration, intensity }, mobility: [...] }\` — cardio is a single object (e.g. \`{ type: "bike", duration: "5 min", intensity: "easy" }\`), mobility is an array of checklist items with \`name\` and \`duration\` or \`reps\`.
+- \`cooldown\`: use \`{ stretching: [...] }\` — an array of checklist items with \`name\` and \`duration\`.
+
 When editing: call \`edit_workout\` with a \`workoutId\` and set-level patches only (\`entryIndex\` + \`setIndex\`). Use the workout ids listed in "Existing Workouts in Planning Window". You may update only \`plannedReps\`, \`plannedWeight\`, or \`targetSeconds\`. Never edit workouts with status \`completed\`, and never edit sets that already have a \`difficulty\` value logged.
 
 When swapping: call \`swap_exercise\` with \`workoutId\`, \`entryIndex\`, and \`toExerciseId\`. Use \`entryIndex\` from the \`E0/E1\` mapping in "Existing Workouts in Planning Window". Never swap an entry that is already in progress (has any set with \`difficulty\`).

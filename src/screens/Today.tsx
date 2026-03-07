@@ -512,14 +512,21 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
 
               {workout.warmup && (() => {
                 const w = workout.warmup
+                const cardioDesc = !Array.isArray(w.cardio) && w.cardio ? w.cardio : null
                 const cardioItems = Array.isArray(w.cardio) ? w.cardio : null
                 const cardioOptions = w.cardioOptions ?? []
                 const mobility = w.mobility ?? []
-                const hasWarmup = cardioItems?.length || cardioOptions.length || mobility.length
+                const hasWarmup = cardioDesc || cardioItems?.length || cardioOptions.length || mobility.length
                 if (!hasWarmup) return null
                 return (
                   <div className="today-phase-section">
                     <div className="today-phase-label">Warm-up</div>
+                    {cardioDesc && (
+                      <p className="today-phase-cardio">
+                        {[cardioDesc.duration, cardioDesc.type, cardioDesc.intensity].filter(Boolean).join(' · ')}
+                        {cardioDesc.notes && <span className="today-checklist-detail"> — {cardioDesc.notes}</span>}
+                      </p>
+                    )}
                     {cardioItems && cardioItems.length > 0 && (
                       <div className="today-checklist">
                         {cardioItems.map((item, i) => (
