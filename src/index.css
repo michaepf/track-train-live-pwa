@@ -2033,6 +2033,14 @@ html, body {
   color: var(--text-muted);
 }
 
+.exercise-tip-demo {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+
 /* ─── First-time modal ─────────────────────────────────────────────────────── */
 
 .modal-overlay {

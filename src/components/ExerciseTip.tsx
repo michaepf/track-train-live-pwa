@@ -30,6 +30,14 @@ export default function ExerciseTip({ exerciseId }: ExerciseTipProps) {
               ))}
             </div>
           )}
+          <a
+            className="exercise-tip-demo"
+            href={`https://www.youtube.com/results?search_query=${encodeURIComponent(name + ' exercise form')}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Watch demo
+          </a>
         </div>
       )}
     </>
