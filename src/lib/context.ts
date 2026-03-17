@@ -519,7 +519,18 @@ function formatTrainingPlan(plan: TrainingPlan): string {
     `Duration: ${plan.durationWeeks} weeks`,
     `Focus: ${plan.focus}`,
   ]
-  if (plan.startDate) lines.push(`Started: ${plan.startDate}`)
+  if (plan.startDate) {
+    lines.push(`Started: ${plan.startDate}`)
+    const start = new Date(`${plan.startDate}T12:00:00`)
+    const now = new Date(`${getToday()}T12:00:00`)
+    const daysSinceStart = Math.floor((now.getTime() - start.getTime()) / 86400000)
+    const currentWeek = Math.max(1, Math.floor(daysSinceStart / 7) + 1)
+    if (currentWeek <= plan.durationWeeks) {
+      lines.push(`Current: week ${currentWeek} of ${plan.durationWeeks}`)
+    } else {
+      lines.push(`Plan expired: week ${currentWeek} of ${plan.durationWeeks} — due for review`)
+    }
+  }
   lines.push('', 'Strategy:', plan.strategy)
   return lines.join('\n')
 }
