@@ -2,12 +2,17 @@ import { useState, useEffect } from 'react'
 import {
   clearAllData,
   clearGoals,
+  clearProfile,
+  clearTrainingPlan,
   clearCompletedWorkouts,
   clearPlannedWorkouts,
   listWorkouts,
   saveSummary,
   getGoals,
   saveGoals,
+  getProfile,
+  getTrainingPlan,
+  saveTrainingPlan,
   getSummary,
   saveWorkout,
   clearWorkoutsOnly,
@@ -21,10 +26,11 @@ import {
   buildUpcomingPlannedContext,
   RECENT_HISTORY_DAYS,
   needsGoalReview,
+  needsPlanReview,
 } from '../lib/context.ts'
 import { SCENARIOS, type ScenarioKey } from '../lib/dev-fixtures.ts'
 import { GoalsSchema } from '../lib/schemas/index.ts'
-import type { Goals, Workout } from '../lib/schemas/index.ts'
+import type { Goals, UserProfile, TrainingPlan, Workout } from '../lib/schemas/index.ts'
 import MarkdownText from '../components/MarkdownText.tsx'
 
 type Scope = 'user' | 'both'
@@ -57,6 +63,15 @@ const ACCOUNT_ACTIONS: ActionDef[] = [
 
 const DATA_ACTIONS: ActionDef[] = [
   {
+    key: 'clearProfile',
+    label: 'Delete profile',
+    confirmLabel: 'Confirm: delete profile',
+    busyLabel: 'Deleting…',
+    description: 'Removes your stored user profile. Goals, plan, and workouts are not affected.',
+    scope: 'user',
+    action: clearProfile,
+  },
+  {
     key: 'clearGoals',
     label: 'Delete all goals info',
     confirmLabel: 'Confirm: delete goals',
@@ -64,6 +79,15 @@ const DATA_ACTIONS: ActionDef[] = [
     description: 'Removes your stored training goals. Workouts and chat history are not affected.',
     scope: 'user',
     action: clearGoals,
+  },
+  {
+    key: 'clearPlan',
+    label: 'Delete training plan',
+    confirmLabel: 'Confirm: delete plan',
+    busyLabel: 'Deleting…',
+    description: 'Removes your training plan. Profile, goals, and workouts are not affected.',
+    scope: 'user',
+    action: clearTrainingPlan,
   },
   {
     key: 'clearHistory',
@@ -123,6 +147,8 @@ async function runSummaryPass(): Promise<string> {
 
 export default function Settings() {
   const [goals, setGoals] = useState<Goals | null>(null)
+  const [profileData, setProfileData] = useState<UserProfile | null>(null)
+  const [planData, setPlanData] = useState<TrainingPlan | null>(null)
   const [goalsEditing, setGoalsEditing] = useState(false)
   const [goalsDraft, setGoalsDraft] = useState('')
   const [goalsSaving, setGoalsSaving] = useState(false)
@@ -141,6 +167,8 @@ export default function Settings() {
 
   useEffect(() => {
     getGoals().then(setGoals)
+    getProfile().then(setProfileData)
+    getTrainingPlan().then(setPlanData)
   }, [])
 
   function startEditingGoals() {
@@ -169,6 +197,12 @@ export default function Settings() {
     try {
       await saveGoals(result.data)
       setGoals(result.data)
+      // Mark training plan for review when goals change
+      if (planData) {
+        const updatedPlan = { ...planData, pendingReview: true, updatedAt: new Date().toISOString() }
+        await saveTrainingPlan(updatedPlan)
+        setPlanData(updatedPlan)
+      }
       setGoalsEditing(false)
     } catch {
       setGoalsSaveError('Failed to save — please try again')
@@ -220,8 +254,12 @@ export default function Settings() {
     setPromptBusy(true)
     setPromptText(null)
     try {
-      const workouts = await listWorkouts(100)
-      const goals = await getGoals()
+      const [workouts, goalsData, profileSnap, planSnap] = await Promise.all([
+        listWorkouts(100),
+        getGoals(),
+        getProfile(),
+        getTrainingPlan(),
+      ])
 
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
       const cutoff = new Date()
@@ -241,7 +279,7 @@ export default function Settings() {
 
       const historyContext = buildHistoryContext(workouts, summaryMap)
       const upcomingContext = buildUpcomingPlannedContext(workouts)
-      const prompt = buildSystemPrompt(goals, 'planning', historyContext, upcomingContext)
+      const prompt = buildSystemPrompt(goalsData, 'planning', historyContext, upcomingContext, [], profileSnap, planSnap)
       setPromptText(prompt)
     } catch (err) {
       setPromptText(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -313,10 +351,42 @@ export default function Settings() {
   }
 
   const goalsReviewNeeded = goals !== null && needsGoalReview(goals)
+  const planReviewNeeded = needsPlanReview(planData, goals)
 
   return (
     <div className="screen-content">
       <h1>Settings</h1>
+
+      {/* Profile */}
+      <section className="settings-section">
+        <div className="settings-label">Profile</div>
+        {profileData ? (
+          <div className="goals-view">
+            <div className="goals-text">
+              {profileData.sex && <p><strong>Sex:</strong> {profileData.sex}</p>}
+              <p><strong>Experience:</strong> {profileData.experience}</p>
+              <p><strong>Available days/week:</strong> {profileData.availableDays}</p>
+              {profileData.sessionMinutes && <p><strong>Session length:</strong> ~{profileData.sessionMinutes} min</p>}
+              <p><strong>Equipment:</strong> {profileData.equipment.join(', ')}</p>
+              {profileData.injuries && <p><strong>Injuries/limitations:</strong> {profileData.injuries}</p>}
+              {profileData.notes && <p><strong>Notes:</strong> {profileData.notes}</p>}
+            </div>
+            <div className="goals-meta">
+              Last updated: {new Date(profileData.updatedAt).toLocaleDateString()}
+            </div>
+            <p className="placeholder-text" style={{ marginTop: 8 }}>
+              To edit your profile, start a Chat with your AI trainer.
+            </p>
+          </div>
+        ) : (
+          <div className="goals-empty">
+            <p className="placeholder-text">No profile set yet.</p>
+            <p className="placeholder-text" style={{ marginTop: 8 }}>
+              Head to Chat to set up your profile with your AI trainer.
+            </p>
+          </div>
+        )}
+      </section>
 
       {/* Goals */}
       <section className="settings-section">
@@ -379,6 +449,45 @@ export default function Settings() {
             >
               Set Goals Manually
             </button>
+          </div>
+        )}
+      </section>
+
+      {/* Training Plan */}
+      <section className="settings-section">
+        <div className="settings-label">Training Plan</div>
+        {planReviewNeeded && planData && (
+          <div className="goals-review-badge">
+            Due for review — start a Chat to update with your AI trainer
+          </div>
+        )}
+        {planData ? (
+          <div className="goals-view">
+            <div className="goals-text">
+              <p><strong>{planData.name}</strong> ({planData.status})</p>
+              <p><strong>Split:</strong> {planData.split}</p>
+              <p><strong>Days/week:</strong> {planData.daysPerWeek}</p>
+              <p><strong>Duration:</strong> {planData.durationWeeks} weeks</p>
+              <p><strong>Focus:</strong> {planData.focus}</p>
+              {planData.startDate && <p><strong>Started:</strong> {planData.startDate}</p>}
+              <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}>
+                <p><strong>Strategy:</strong></p>
+                <MarkdownText text={planData.strategy} />
+              </div>
+            </div>
+            <div className="goals-meta">
+              Last updated: {new Date(planData.updatedAt).toLocaleDateString()}
+            </div>
+            <p className="placeholder-text" style={{ marginTop: 8 }}>
+              To update your plan, start a Chat with your AI trainer.
+            </p>
+          </div>
+        ) : (
+          <div className="goals-empty">
+            <p className="placeholder-text">No training plan set yet.</p>
+            <p className="placeholder-text" style={{ marginTop: 8 }}>
+              Head to Chat to create a training plan with your AI trainer.
+            </p>
           </div>
         )}
       </section>

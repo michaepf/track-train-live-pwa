@@ -11,6 +11,8 @@
 import {
   getWorkoutStatus,
   type Goals,
+  type UserProfile,
+  type TrainingPlan,
   type Workout,
 } from './schemas/index.ts'
 import { buildCatalogPromptSection, type Exercise } from '../data/exercises.ts'
@@ -100,6 +102,31 @@ const SIX_WEEKS_MS = 6 * 7 * 24 * 60 * 60 * 1000
 export function needsGoalReview(goals: Goals): boolean {
   if (goals.pendingReview) return true
   return Date.now() - new Date(goals.updatedAt).getTime() > SIX_WEEKS_MS
+}
+
+// ─── Plan review trigger ────────────────────────────────────────────────────────
+
+/**
+ * Returns true if the training plan needs review:
+ * - no plan exists (but goals do)
+ * - plan.pendingReview is set
+ * - plan is expired (startDate + durationWeeks < today)
+ */
+export function needsPlanReview(
+  plan: TrainingPlan | null,
+  goals: Goals | null,
+): boolean {
+  if (!goals) return false // no goals → onboarding, not plan review
+  if (!plan) return true   // goals exist but no plan
+  if (plan.pendingReview) return true
+  if (plan.startDate && plan.durationWeeks) {
+    const start = new Date(`${plan.startDate}T12:00:00Z`)
+    const end = new Date(start)
+    end.setDate(end.getDate() + plan.durationWeeks * 7)
+    const today = new Date(`${getToday()}T12:00:00Z`)
+    if (today >= end) return true
+  }
+  return false
 }
 
 // ─── Workout formatting ────────────────────────────────────────────────────────
@@ -333,11 +360,24 @@ export function buildUpcomingPlannedContext(workouts: Workout[]): string {
 type ConvMode = 'onboarding' | 'goal_review' | 'planning'
 
 const ROLE_INSTRUCTIONS: Record<ConvMode, string> = {
-  onboarding: `You are an AI personal trainer helping a new user establish their training goals. Ask thoughtful questions about their fitness background, current goals, available equipment and time, and any physical limitations. When you have gathered enough to write a useful goals summary, call the \`propose_goals\` tool. Keep the tone conversational and encouraging. Do not dump all questions at once — have a natural back-and-forth.`,
+  onboarding: `You are an AI personal trainer helping a new user get started. Work through these steps in order, gathering information conversationally before proposing each:
 
-  goal_review: `You are an AI personal trainer reviewing a user's training goals. Acknowledge what's currently set, ask about recent changes or new priorities, and when ready, call \`propose_goals\` with an updated summary. Keep it focused — this should be a short review, not a full re-onboarding.`,
+1. **Profile** — Ask about their fitness background, experience level, available training days per week, typical session length, equipment access, and any injuries/limitations. When ready, call \`propose_profile\`.
+2. **Goals** — Ask about their aspirations and what they want to achieve (keep this separate from profile characteristics). When ready, call \`propose_goals\`.
+3. **Training Plan** — Using the accepted profile and goals, propose a medium-term training plan with a split, progression strategy, and duration. Call \`propose_training_plan\`.
+
+Keep the tone conversational and encouraging. Do not dump all questions at once — have a natural back-and-forth. Check the Setup Status section to see which steps are already complete and pick up from there.`,
+
+  goal_review: `You are an AI personal trainer reviewing a user's training setup. Check the Setup Status section to see what needs attention. You may need to:
+- Update the user profile via \`propose_profile\` (if profile changed or is missing)
+- Update goals via \`propose_goals\` (if goals are stale or changed)
+- Create or update the training plan via \`propose_training_plan\` (if plan is missing, expired, or marked for review)
+
+Keep it focused — this should be a short review, not a full re-onboarding. Acknowledge what's currently set, ask about changes, and propose updates.`,
 
   planning: `You are an AI personal trainer. Answer questions conversationally. When the user asks you to plan, schedule, add, or broadly change workouts, call \`propose_workout\` with an array of workout objects — each using a date from the D0–D6 planning window. Always append new workouts; never attempt to replace or delete existing ones without explicit instruction.
+
+Reference the user's profile (hard constraints), goals (aspirations), and training plan (current strategy) when proposing workouts. The plan's split and days/week guide workout structure; the plan's strategy text guides progression, exercise selection, and periodization.
 
 For user-facing text responses:
 - Do not use D0/D1/D2 labels in final wording; use real dates or weekday names.
@@ -346,11 +386,21 @@ For user-facing text responses:
 }
 
 const TOOL_INSTRUCTIONS: Record<ConvMode, string> = {
-  onboarding: `When you have enough information, call \`propose_goals\` with a clear, concise goals summary (max 2000 characters). The user will review it and can accept or ask for changes. Do not narrate or describe the tool call in plain text — emit an actual tool call.`,
+  onboarding: `You have three proposal tools to use in sequence:
+1. \`propose_profile\` — call when you've gathered enough about the user's background, equipment, schedule, and limitations. Fields: sex, experience, availableDays, sessionMinutes, equipment, injuries, notes.
+2. \`propose_goals\` — call with a clear, concise goals summary (aspirations only).
+3. \`propose_training_plan\` — call after profile and goals are accepted, with a medium-term plan: name, split, daysPerWeek, durationWeeks, focus, strategy (detailed free-form text covering progression, exercise priorities, deload timing, etc.), and startDate.
 
-  goal_review: `Call \`propose_goals\` when you have an updated goals summary ready. The user will review and confirm. Do not narrate or describe the tool call in plain text — emit an actual tool call.`,
+The user will review and accept or request changes for each. Do not narrate or describe tool calls in plain text — emit actual tool calls.`,
 
-  planning: `Use \`propose_workout\` when proposing or replacing workouts in the schedule. Use \`edit_workout\` only for small patches to planned set values in an existing workout. Use \`swap_exercise\` to replace one entry's exercise without changing the overall workout structure. For general questions, answer directly without calling any tool.
+  goal_review: `You have three proposal tools available:
+- \`propose_profile\` — call if the user's profile needs updating.
+- \`propose_goals\` — call when you have an updated goals summary ready.
+- \`propose_training_plan\` — call when a new or updated plan is needed.
+
+The user will review and confirm each. Do not narrate or describe tool calls in plain text — emit actual tool calls.`,
+
+  planning: `Use \`propose_workout\` when proposing or replacing workouts in the schedule. Use \`edit_workout\` only for small patches to planned set values in an existing workout. Use \`swap_exercise\` to replace one entry's exercise without changing the overall workout structure. Use \`propose_training_plan\` if the user asks to update their training plan mid-cycle. For general questions, answer directly without calling any tool.
 
 When proposing: call \`propose_workout\` with an array of 1–7 workout objects, each using a date from the D0–D6 planning window. Review "Existing Workouts in Planning Window" before proposing — append around existing sessions; do not duplicate them. Each strength exercise entry must include multiple set objects in the \`sets\` array (typically 3 sets), each with \`plannedReps\` and \`plannedWeight\` in lb. Always include a weight — use the most recent result from history, or a conservative beginner estimate if no history exists. Omit \`plannedWeight\` only for bodyweight-only or timed-hold exercises (e.g. plank, dead bug).
 
@@ -378,14 +428,49 @@ export function buildSystemPrompt(
   historyContext = '',
   upcomingContext = '',
   customExercises: Exercise[] = [],
+  profile: UserProfile | null = null,
+  trainingPlan: TrainingPlan | null = null,
 ): string {
   const window = getPlanningWindow()
   const windowStr = window.map((d, i) => `  D${i}: ${d.date} — ${d.label}`).join('\n')
   const today = window[0].date
 
+  // --- Setup Status (checkpoint-based phase detection) ---
+  const setupParts: string[] = [
+    `- Profile: ${profile ? 'set' : 'missing'}`,
+    `- Goals: ${goals ? 'set' : 'missing'}${goals?.pendingReview ? ' (pending review)' : ''}`,
+  ]
+  if (goals) {
+    const planStatus = !trainingPlan
+      ? 'missing'
+      : trainingPlan.pendingReview
+        ? 'pending review'
+        : trainingPlan.status === 'completed'
+          ? 'completed'
+          : 'active'
+    setupParts.push(`- Training Plan: ${planStatus}`)
+  }
+  const setupSection = `## Setup Status\n\n${setupParts.join('\n')}`
+
+  // --- Profile section ---
+  const profileSection = profile
+    ? `## User Profile\n\n${formatProfile(profile)}`
+    : ''
+
+  // --- Goals section ---
   const goalsSection = goals
     ? `## User Goals\n\n${goals.text}`
     : `## User Goals\n\nNot yet established.`
+
+  // --- Training Plan section ---
+  const planSection = trainingPlan
+    ? `## Training Plan\n\n${formatTrainingPlan(trainingPlan)}`
+    : ''
+
+  // --- Data precedence rules (included when all three artifacts exist) ---
+  const precedenceSection = profile && goals && trainingPlan
+    ? `## Data Precedence\n\n- **Profile = hard constraints** — always respect available days, equipment, injuries\n- **Goals = aspirations** — what the user wants to achieve\n- **Training Plan = current strategy** — constrained by profile, informed by goals\n- \`trainingPlan.daysPerWeek\` must be ≤ \`profile.availableDays\`\n- If profile lists injuries, the plan's strategy must account for them`
+    : ''
 
   const historySection = historyContext
     ? `## Training History\n\n${historyContext}`
@@ -398,10 +483,14 @@ export function buildSystemPrompt(
   const sections = [
     `# Track Train Live — AI Trainer`,
     `Today: ${today}`,
+    setupSection,
     `## Your Role\n\n${ROLE_INSTRUCTIONS[mode]}`,
     `## Tool Instructions\n\n${TOOL_INSTRUCTIONS[mode]}`,
     `## Planning Window (D0–D6)\n\n${windowStr}`,
+    profileSection,
     goalsSection,
+    planSection,
+    precedenceSection,
     mode === 'planning' ? buildCatalogPromptSection(customExercises) : '',
     mode !== 'goal_review' ? buildBaselinePromptSection() : '',
     upcomingSection,
@@ -409,4 +498,29 @@ export function buildSystemPrompt(
   ].filter(Boolean)
 
   return sections.join('\n\n')
+}
+
+function formatProfile(profile: UserProfile): string {
+  const lines: string[] = []
+  if (profile.sex) lines.push(`Sex: ${profile.sex}`)
+  lines.push(`Experience: ${profile.experience}`)
+  lines.push(`Available days/week: ${profile.availableDays}`)
+  if (profile.sessionMinutes) lines.push(`Session length: ~${profile.sessionMinutes} min`)
+  lines.push(`Equipment: ${profile.equipment.join(', ')}`)
+  if (profile.injuries) lines.push(`Injuries/limitations: ${profile.injuries}`)
+  if (profile.notes) lines.push(`Notes: ${profile.notes}`)
+  return lines.join('\n')
+}
+
+function formatTrainingPlan(plan: TrainingPlan): string {
+  const lines: string[] = [
+    `**${plan.name}** (${plan.status})`,
+    `Split: ${plan.split}`,
+    `Days/week: ${plan.daysPerWeek}`,
+    `Duration: ${plan.durationWeeks} weeks`,
+    `Focus: ${plan.focus}`,
+  ]
+  if (plan.startDate) lines.push(`Started: ${plan.startDate}`)
+  lines.push('', 'Strategy:', plan.strategy)
+  return lines.join('\n')
 }

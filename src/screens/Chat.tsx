@@ -7,6 +7,7 @@ import {
   buildHistoryContext,
   buildUpcomingPlannedContext,
   needsGoalReview,
+  needsPlanReview,
   getWeekKey,
   getToday,
   RECENT_HISTORY_DAYS,
@@ -15,6 +16,10 @@ import { useApiKey } from '../App.tsx'
 import {
   getGoals,
   saveGoals,
+  getProfile,
+  saveProfile,
+  getTrainingPlan,
+  saveTrainingPlan,
   saveWorkout,
   getWorkoutById,
   saveConversation,
@@ -31,26 +36,36 @@ import {
 import type { Exercise } from '../data/exercises.ts'
 import {
   GoalsSchema,
+  UserProfileSchema,
+  TrainingPlanSchema,
   WorkoutSchema,
   isEntryInProgress,
   isSetCompleted,
 } from '../lib/schemas/index.ts'
 import type {
   Goals,
+  UserProfile,
+  TrainingPlan,
   Conversation,
   Message,
   ConversationType,
+  ProposeProfilePayload,
+  ProposeTrainingPlanPayload,
   ProposeWorkoutsPayload,
 } from '../lib/schemas/index.ts'
 import type { StreamResult } from '../lib/api.ts'
 import {
+  ProposeProfileCard,
   ProposeGoalsCard,
+  ProposeTrainingPlanCard,
   ProposeWorkoutCard,
   ToolErrorCard,
 } from '../components/ToolCard.tsx'
 import MarkdownText from '../components/MarkdownText.tsx'
 import {
+  PROPOSE_PROFILE_TOOL,
   PROPOSE_GOALS_TOOL,
+  PROPOSE_TRAINING_PLAN_TOOL,
   PROPOSE_WORKOUT_TOOL,
   ADD_EXERCISE_TOOL,
   REMOVE_EXERCISE_TOOL,
@@ -165,6 +180,8 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
   const apiKey = useApiKey()
 
   const [goals, setGoals] = useState<Goals | null>(null)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [trainingPlan, setTrainingPlan] = useState<TrainingPlan | null>(null)
   const [customExercises, setCustomExercises] = useState<Exercise[]>([])
   const [conv, setConv] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -197,21 +214,38 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
 
   useEffect(() => {
     async function init() {
-      const [goalsData, modelSetting, conversations, customEx] = await Promise.all([
+      const [goalsData, profileData, planData, modelSetting, conversations, customEx] = await Promise.all([
         getGoals(),
+        getProfile(),
+        getTrainingPlan(),
         getSetting('model'),
         listConversations(20),
         getCustomExercises(),
       ])
       setCustomExercises(customEx)
 
-      const convMode: ConversationType = !goalsData
-        ? 'onboarding'
-        : needsGoalReview(goalsData)
-          ? 'goal_review'
-          : 'planning'
+      // Checkpoint-based mode selection:
+      // No profile → onboarding (start with profile)
+      // Profile exists, no goals → onboarding (focus on goals)
+      // Goals exist, no plan → goal_review (focus on creating plan)
+      // needsGoalReview or needsPlanReview → goal_review
+      // All present, nothing stale → planning
+      let convMode: ConversationType
+      if (!profileData) {
+        convMode = 'onboarding'
+      } else if (!goalsData) {
+        convMode = 'onboarding'
+      } else if (needsGoalReview(goalsData)) {
+        convMode = 'goal_review'
+      } else if (needsPlanReview(planData, goalsData)) {
+        convMode = 'goal_review'
+      } else {
+        convMode = 'planning'
+      }
 
       setGoals(goalsData)
+      setProfile(profileData)
+      setTrainingPlan(planData)
       setMode(convMode)
       setModel(modelSetting === 'premium' ? MODELS.premium : MODELS.affordable)
 
@@ -284,7 +318,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
   // Safety net: if pendingTool exists but no actionable goals card is visible,
   // clear pending state so input never stays locked.
   useEffect(() => {
-    const hasActionableCard = toolCard?.kind === 'goals' || toolCard?.kind === 'workouts'
+    const hasActionableCard = toolCard?.kind === 'profile' || toolCard?.kind === 'goals' || toolCard?.kind === 'trainingPlan' || toolCard?.kind === 'workouts'
     if (pendingTool && !hasActionableCard) {
       setPendingTool(null)
     }
@@ -304,7 +338,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
       const capturedGoals = goals
       const capturedMode = mode
       const capturedModel = model
-      doStream([], null, capturedMode, capturedGoals, capturedModel, customExercises)
+      doStream([], null, capturedMode, capturedGoals, capturedModel, customExercises, profile, trainingPlan)
     }
     // Intentionally omit doStream — stable within this effect's lifecycle
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -324,7 +358,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     const capturedMode = mode
     const capturedModel = model
     persistConv(thread, conv, capturedMode).then((savedConv) => {
-      doStream(thread, savedConv, capturedMode, capturedGoals, capturedModel, customExercises)
+      doStream(thread, savedConv, capturedMode, capturedGoals, capturedModel, customExercises, profile, trainingPlan)
     })
     // Intentionally omit doStream/persistConv — stable within this effect's lifecycle
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -519,6 +553,8 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     currentGoals: Goals | null,
     currentModel: string,
     currentCustomExercises: Exercise[] = [],
+    currentProfile: UserProfile | null = null,
+    currentPlan: TrainingPlan | null = null,
   ) {
     if (!apiKey || !currentModel) {
       return
@@ -532,36 +568,42 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     setStreamError(null)
     setToolCard(null)
 
-    // Build history context for planning (inject recent workout data)
+    // Build history context — planning always, goal_review always, onboarding if workout data exists
     let historyContext = ''
     let upcomingContext = ''
-    if (currentMode === 'planning') {
+    const includeHistory = currentMode === 'planning' || currentMode === 'goal_review' || currentMode === 'onboarding'
+    if (includeHistory) {
       const knownWorkouts = await listWorkouts(100)
-      const summaryMap = new Map<string, string>()
-      // Load summaries for weeks older than 3 weeks (knownWorkouts is sorted desc)
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-      const cutoff = new Date()
-      cutoff.setDate(cutoff.getDate() - RECENT_HISTORY_DAYS)
-      const cutoffStr = cutoff.toLocaleDateString('en-CA', { timeZone: tz })
-      const olderWeekKeys = [
-        ...new Set(
-          knownWorkouts.filter((w) => w.date < cutoffStr).map((w) => getWeekKey(w.date)),
-        ),
-      ]
-      for (const wk of olderWeekKeys) {
-        const summary = await getSummary(wk)
-        if (summary) summaryMap.set(wk, summary)
+      if (knownWorkouts.length > 0 || currentMode === 'planning') {
+        const summaryMap = new Map<string, string>()
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+        const cutoff = new Date()
+        cutoff.setDate(cutoff.getDate() - RECENT_HISTORY_DAYS)
+        const cutoffStr = cutoff.toLocaleDateString('en-CA', { timeZone: tz })
+        const olderWeekKeys = [
+          ...new Set(
+            knownWorkouts.filter((w) => w.date < cutoffStr).map((w) => getWeekKey(w.date)),
+          ),
+        ]
+        for (const wk of olderWeekKeys) {
+          const summary = await getSummary(wk)
+          if (summary) summaryMap.set(wk, summary)
+        }
+        historyContext = buildHistoryContext(knownWorkouts, summaryMap)
+        if (currentMode === 'planning') {
+          upcomingContext = buildUpcomingPlannedContext(knownWorkouts)
+        }
       }
-      historyContext = buildHistoryContext(knownWorkouts, summaryMap)
-      upcomingContext = buildUpcomingPlannedContext(knownWorkouts)
     }
 
     const tools =
-      currentMode === 'onboarding' || currentMode === 'goal_review'
-        ? [PROPOSE_GOALS_TOOL]
-        : currentMode === 'planning'
-          ? [PROPOSE_WORKOUT_TOOL, EDIT_WORKOUT_TOOL, SWAP_EXERCISE_TOOL, DELETE_FUTURE_WORKOUTS_TOOL, ADD_EXERCISE_TOOL, REMOVE_EXERCISE_TOOL]
-          : []
+      currentMode === 'onboarding'
+        ? [PROPOSE_PROFILE_TOOL, PROPOSE_GOALS_TOOL, PROPOSE_TRAINING_PLAN_TOOL]
+        : currentMode === 'goal_review'
+          ? [PROPOSE_PROFILE_TOOL, PROPOSE_GOALS_TOOL, PROPOSE_TRAINING_PLAN_TOOL]
+          : currentMode === 'planning'
+            ? [PROPOSE_WORKOUT_TOOL, EDIT_WORKOUT_TOOL, SWAP_EXERCISE_TOOL, DELETE_FUTURE_WORKOUTS_TOOL, ADD_EXERCISE_TOOL, REMOVE_EXERCISE_TOOL, PROPOSE_TRAINING_PLAN_TOOL]
+            : []
 
     await streamChat({
       apiKey,
@@ -569,7 +611,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
       messages: thread,
       tools,
       toolChoice: currentMode === 'planning' ? 'auto' : undefined,
-      systemPrompt: buildSystemPrompt(currentGoals, currentMode, historyContext, upcomingContext, currentCustomExercises),
+      systemPrompt: buildSystemPrompt(currentGoals, currentMode, historyContext, upcomingContext, currentCustomExercises, currentProfile, currentPlan),
       signal: abortRef.current.signal,
 
       onDelta: (text) => {
@@ -597,7 +639,9 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
 
         if (result.toolCall) {
           const tc: PendingTool = result.toolCall
+          console.log('[chat] tool call received:', tc.name, 'id:', tc.id, 'args length:', tc.arguments.length)
           const resolved = resolveToolCall(tc, new Set(currentCustomExercises.map((e) => e.id)))
+          console.log('[chat] resolveToolCall result:', resolved.kind, resolved.kind === 'card' ? resolved.cardState.kind : resolved.kind === 'error' ? resolved.message : '')
           if (resolved.kind === 'error') {
             // Auto-resolve: append tool error result so the thread stays valid.
             // Input remains enabled — user can keep chatting.
@@ -609,8 +653,6 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
                 toolCallId: tc.id,
               },
             ]
-            setToolCard({ kind: 'error', toolName: resolved.toolName, message: resolved.message })
-
             if (toolValidationRetryRef.current < MAX_TOOL_VALIDATION_RETRIES) {
               toolValidationRetryRef.current += 1
               const retryInstruction: Message = {
@@ -625,10 +667,11 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
               const retryThread = [...finalMessages, retryInstruction]
               setMessages(retryThread)
               const savedConv = await persistConv(retryThread, currentConv, currentMode)
-              await doStream(retryThread, savedConv, currentMode, currentGoals, currentModel, currentCustomExercises)
+              await doStream(retryThread, savedConv, currentMode, currentGoals, currentModel, currentCustomExercises, currentProfile, currentPlan)
               return
             }
-            // Retry cap reached — leave error visible and keep input enabled.
+            // Retry cap reached — show error and keep input enabled.
+            setToolCard({ kind: 'error', toolName: resolved.toolName, message: resolved.message })
           } else if (resolved.kind === 'execute') {
             try {
               const outcome = await executeToolAction(resolved.execution)
@@ -656,7 +699,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
                 ]
                 setMessages(finalMessages)
                 const savedConv = await persistConv(threadWithNudge, currentConv, currentMode)
-                await doStream(threadWithNudge, savedConv, currentMode, currentGoals, currentModel, currentCustomExercises)
+                await doStream(threadWithNudge, savedConv, currentMode, currentGoals, currentModel, currentCustomExercises, currentProfile, currentPlan)
                 return
               }
               finalMessages = [
@@ -784,7 +827,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     toolValidationRetryRef.current = 0
 
     const savedConv = await persistConv(newThread, conv, mode)
-    await doStream(newThread, savedConv, mode, goals, model, customExercises)
+    await doStream(newThread, savedConv, mode, goals, model, customExercises, profile, trainingPlan)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -820,10 +863,91 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
       content: 'Goals accepted.',
       toolCallId: pendingTool.id,
     }
+
+    // If training plan exists and not pending review, switch to planning
+    // Otherwise, stay in current mode so AI continues toward training plan
+    const hasValidPlan = trainingPlan && !trainingPlan.pendingReview
+    const nextMode: ConversationType = hasValidPlan ? 'planning' : mode
+    const confirmMsg: Message = {
+      role: 'assistant',
+      content: hasValidPlan
+        ? 'Great — your goals are saved. I\'m now building your workouts. You can ask me anytime to adjust any part of your plan.'
+        : 'Great — your goals are saved. Now let\'s put together a training plan based on your profile and goals.',
+    }
+    const newMessages = [...messages, toolResult, confirmMsg]
+    setMessages(newMessages)
+    setToolCard(null)
+    setPendingTool(null)
+    setMode(nextMode)
+
+    const savedConv = await persistConv(newMessages, conv, nextMode)
+    fakeToolRetryRef.current = 0
+    toolValidationRetryRef.current = 0
+    await doStream(newMessages, savedConv, nextMode, newGoals, model, customExercises, profile, trainingPlan)
+  }
+
+  async function handleAcceptProfile(profilePayload: ProposeProfilePayload) {
+    if (!pendingTool) return
+
+    const now = new Date().toISOString()
+    const newProfile = UserProfileSchema.parse({ ...profilePayload, updatedAt: now })
+    await saveProfile(newProfile)
+    setProfile(newProfile)
+
+    // If a training plan exists, mark it for review since profile changed
+    if (trainingPlan) {
+      const updatedPlan = { ...trainingPlan, pendingReview: true, updatedAt: now }
+      await saveTrainingPlan(updatedPlan)
+      setTrainingPlan(updatedPlan)
+    }
+
+    const toolResult: Message = {
+      role: 'tool',
+      content: 'Profile accepted.',
+      toolCallId: pendingTool.id,
+    }
+    const confirmMsg: Message = {
+      role: 'assistant',
+      content: goals
+        ? 'Profile updated. Let\'s review your goals and training plan next.'
+        : 'Profile saved! Now let\'s talk about your training goals.',
+    }
+    const newMessages = [...messages, toolResult, confirmMsg]
+    setMessages(newMessages)
+    setToolCard(null)
+    setPendingTool(null)
+
+    const savedConv = await persistConv(newMessages, conv, mode)
+    fakeToolRetryRef.current = 0
+    toolValidationRetryRef.current = 0
+    await doStream(newMessages, savedConv, mode, goals, model, customExercises, newProfile, trainingPlan)
+  }
+
+  async function handleAcceptTrainingPlan(planPayload: ProposeTrainingPlanPayload) {
+    if (!pendingTool) return
+
+    const now = new Date().toISOString()
+    const newPlan = TrainingPlanSchema.parse({
+      ...planPayload,
+      startDate: planPayload.startDate ?? getToday(),
+      status: 'active',
+      pendingReview: false,
+      createdAt: now,
+      updatedAt: now,
+    })
+    await saveTrainingPlan(newPlan)
+    setTrainingPlan(newPlan)
+
+    const toolResult: Message = {
+      role: 'tool',
+      content: 'Training plan accepted.',
+      toolCallId: pendingTool.id,
+    }
     const confirmMsg: Message = {
       role: 'assistant',
       content:
-        'Great — your goals are saved. I\'m now building your first week of workouts. You can ask me anytime to adjust any part of your plan.',
+        `Your training plan "${newPlan.name}" is set. I'm now ready to build your workouts. ` +
+        'You can ask me anytime to adjust your plan or schedule.',
     }
     const newMessages = [...messages, toolResult, confirmMsg]
     setMessages(newMessages)
@@ -836,8 +960,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     const savedConv = await persistConv(newMessages, conv, nextMode)
     fakeToolRetryRef.current = 0
     toolValidationRetryRef.current = 0
-    // Continue — model acknowledges acceptance
-    await doStream(newMessages, savedConv, nextMode, newGoals, model, customExercises)
+    await doStream(newMessages, savedConv, nextMode, goals, model, customExercises, profile, newPlan)
   }
 
   async function handleAcceptWorkouts(workouts: ProposeWorkoutsPayload) {
@@ -908,7 +1031,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     const savedConv = await persistConv(newMessages, conv, mode)
     fakeToolRetryRef.current = 0
     toolValidationRetryRef.current = 0
-    await doStream(newMessages, savedConv, mode, goals, model, customExercises)
+    await doStream(newMessages, savedConv, mode, goals, model, customExercises, profile, trainingPlan)
   }
 
   // ─── New conversation ─────────────────────────────────────────────────────────
@@ -944,7 +1067,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     streaming ||
     toolActionBusy ||
     (pendingTool !== null &&
-      (toolCard?.kind === 'goals' || toolCard?.kind === 'workouts'))
+      (toolCard?.kind === 'profile' || toolCard?.kind === 'goals' || toolCard?.kind === 'trainingPlan' || toolCard?.kind === 'workouts'))
 
   return (
     <div className="chat-screen">
@@ -1045,12 +1168,32 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
         <div ref={bottomRef} />
       </div>
 
-      {/* Goals proposal panel is fixed above input so it is always visible/clickable */}
+      {/* Proposal panels are fixed above input so they are always visible/clickable */}
+      {toolCard?.kind === 'profile' && (
+        <div className="chat-tool-panel">
+          <ProposeProfileCard
+            profile={toolCard.profile}
+            onAccept={() => handleAcceptProfile(toolCard.profile)}
+            onRequestChanges={handleRequestChanges}
+          />
+        </div>
+      )}
+
       {toolCard?.kind === 'goals' && (
         <div className="chat-tool-panel">
           <ProposeGoalsCard
             proposedText={toolCard.text}
             onAccept={() => handleAcceptGoals(toolCard.text)}
+            onRequestChanges={handleRequestChanges}
+          />
+        </div>
+      )}
+
+      {toolCard?.kind === 'trainingPlan' && (
+        <div className="chat-tool-panel">
+          <ProposeTrainingPlanCard
+            plan={toolCard.plan}
+            onAccept={() => handleAcceptTrainingPlan(toolCard.plan)}
             onRequestChanges={handleRequestChanges}
           />
         </div>

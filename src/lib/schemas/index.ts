@@ -1,3 +1,5 @@
 export * from './goals.ts'
+export * from './profile.ts'
+export * from './trainingPlan.ts'
 export * from './workout.ts'
 export * from './conversation.ts'

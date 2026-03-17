@@ -1,9 +1,13 @@
 import {
   type Goals,
+  type UserProfile,
+  type TrainingPlan,
   type Workout,
   type Conversation,
   type ConversationType,
   migrateGoals,
+  migrateProfile,
+  migrateTrainingPlan,
   migrateWorkout,
   migrateConversation,
   isWorkoutCompleted,
@@ -11,7 +15,7 @@ import {
 import type { Exercise } from '../data/exercises.ts'
 
 export const DB_NAME = 'track-train-live'
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 
 let _db: Promise<IDBDatabase> | null = null
 
@@ -70,6 +74,13 @@ function upgrade(event: IDBVersionChangeEvent): void {
     // customExercises — out-of-line key (exercise id string)
     db.createObjectStore('customExercises')
   }
+
+  if (oldVersion < 3) {
+    // profile — fixed key "current", out-of-line key
+    db.createObjectStore('profile')
+    // trainingPlan — fixed key "current", out-of-line key
+    db.createObjectStore('trainingPlan')
+  }
 }
 
 function idbReq<T>(request: IDBRequest<T>): Promise<T> {
@@ -99,6 +110,40 @@ export async function saveGoals(goals: Goals): Promise<void> {
   const db = await getDB()
   await idbReq(
     db.transaction('goals', 'readwrite').objectStore('goals').put(goals, 'current'),
+  )
+}
+
+// ─── Profile ─────────────────────────────────────────────────────────────────
+
+export async function getProfile(): Promise<UserProfile | null> {
+  const db = await getDB()
+  const result = await idbReq(
+    db.transaction('profile', 'readonly').objectStore('profile').get('current'),
+  )
+  return result ? migrateProfile(result) : null
+}
+
+export async function saveProfile(profile: UserProfile): Promise<void> {
+  const db = await getDB()
+  await idbReq(
+    db.transaction('profile', 'readwrite').objectStore('profile').put(profile, 'current'),
+  )
+}
+
+// ─── Training Plan ───────────────────────────────────────────────────────────
+
+export async function getTrainingPlan(): Promise<TrainingPlan | null> {
+  const db = await getDB()
+  const result = await idbReq(
+    db.transaction('trainingPlan', 'readonly').objectStore('trainingPlan').get('current'),
+  )
+  return result ? migrateTrainingPlan(result) : null
+}
+
+export async function saveTrainingPlan(plan: TrainingPlan): Promise<void> {
+  const db = await getDB()
+  await idbReq(
+    db.transaction('trainingPlan', 'readwrite').objectStore('trainingPlan').put(plan, 'current'),
   )
 }
 
@@ -394,6 +439,22 @@ export async function clearGoals(): Promise<void> {
   )
 }
 
+/** Clears the stored user profile. */
+export async function clearProfile(): Promise<void> {
+  const db = await getDB()
+  await idbReq(
+    db.transaction('profile', 'readwrite').objectStore('profile').delete('current'),
+  )
+}
+
+/** Clears the stored training plan. */
+export async function clearTrainingPlan(): Promise<void> {
+  const db = await getDB()
+  await idbReq(
+    db.transaction('trainingPlan', 'readwrite').objectStore('trainingPlan').delete('current'),
+  )
+}
+
 /**
  * Deletes all completed workouts (those with recorded difficulty values or
  * an explicit completed status) and clears summaries.
@@ -448,11 +509,13 @@ export async function clearPlannedWorkouts(): Promise<void> {
 export async function clearAllData(): Promise<void> {
   const db = await getDB()
   const tx = db.transaction(
-    ['goals', 'workouts', 'conversations', 'summaries'],
+    ['goals', 'profile', 'trainingPlan', 'workouts', 'conversations', 'summaries'],
     'readwrite',
   )
 
   tx.objectStore('goals').clear()
+  tx.objectStore('profile').clear()
+  tx.objectStore('trainingPlan').clear()
   tx.objectStore('workouts').clear()
   tx.objectStore('conversations').clear()
   tx.objectStore('summaries').clear()

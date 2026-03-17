@@ -8,3 +8,11 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 )
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistration().then((registration) => {
+    if (registration) {
+      setInterval(() => registration.update(), 60 * 60 * 1000)
+    }
+  })
+}

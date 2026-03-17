@@ -4,8 +4,13 @@
  */
 
 import type { Exercise } from '../data/exercises.ts'
-import { ProposeGoalsPayloadSchema, ProposeWorkoutsPayloadSchema } from './schemas/index.ts'
-import type { ProposeWorkoutsPayload } from './schemas/index.ts'
+import {
+  ProposeGoalsPayloadSchema,
+  ProposeProfilePayloadSchema,
+  ProposeTrainingPlanPayloadSchema,
+  ProposeWorkoutsPayloadSchema,
+} from './schemas/index.ts'
+import type { ProposeProfilePayload, ProposeTrainingPlanPayload, ProposeWorkoutsPayload } from './schemas/index.ts'
 import { getPlanningWindow } from './context.ts'
 
 // ─── Tool definitions ──────────────────────────────────────────────────────────
@@ -19,11 +24,48 @@ export const PROPOSE_GOALS_TOOL = {
     properties: {
       text: {
         type: 'string',
-        description: "A clear, concise summary of the user's training goals (max 2000 characters).",
-        maxLength: 2000,
+        description: "A clear, concise summary of the user's training goals.",
       },
     },
     required: ['text'],
+  },
+}
+
+export const PROPOSE_PROFILE_TOOL = {
+  name: 'propose_profile',
+  description:
+    "Propose a user profile based on information gathered during onboarding. The user will review and accept or request changes.",
+  parameters: {
+    type: 'object',
+    properties: {
+      sex: { type: ['string', 'null'], enum: ['male', 'female', null], description: 'Biological sex (optional).' },
+      experience: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'], description: 'Training experience level.' },
+      availableDays: { type: 'integer', minimum: 1, maximum: 7, description: 'Number of training days per week.' },
+      sessionMinutes: { type: ['integer', 'null'], minimum: 10, maximum: 300, description: 'Typical session length in minutes (optional).' },
+      equipment: { type: 'array', items: { type: 'string' }, description: 'Available equipment, e.g. ["full_gym"] or ["dumbbells", "pullup_bar"].' },
+      injuries: { type: ['string', 'null'], description: 'Any injuries or physical limitations (optional).' },
+      notes: { type: ['string', 'null'], description: 'Any other relevant notes (optional).' },
+    },
+    required: ['experience', 'availableDays', 'equipment'],
+  },
+}
+
+export const PROPOSE_TRAINING_PLAN_TOOL = {
+  name: 'propose_training_plan',
+  description:
+    "Propose a medium-term training plan based on the user's profile and goals. Includes structured fields plus a detailed strategy text.",
+  parameters: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'Plan name, e.g. "6-Week Hypertrophy Block".' },
+      split: { type: 'string', description: 'Training split, e.g. "Push / Pull / Legs".' },
+      daysPerWeek: { type: 'integer', minimum: 1, maximum: 7, description: 'Training days per week.' },
+      durationWeeks: { type: 'integer', minimum: 1, maximum: 52, description: 'Plan duration in weeks.' },
+      focus: { type: 'string', description: 'Primary focus, e.g. "hypertrophy", "strength", "general fitness".' },
+      strategy: { type: 'string', description: 'Detailed free-form strategy covering progression scheme, exercise priorities, deload timing, adaptation cues, etc.' },
+      startDate: { type: ['string', 'null'], description: 'Plan start date YYYY-MM-DD (defaults to today if null).' },
+    },
+    required: ['name', 'split', 'daysPerWeek', 'durationWeeks', 'focus', 'strategy'],
   },
 }
 
@@ -182,7 +224,9 @@ export type PendingTool = {
 }
 
 export type ToolCardState =
+  | { kind: 'profile'; profile: ProposeProfilePayload }
   | { kind: 'goals'; text: string }
+  | { kind: 'trainingPlan'; plan: ProposeTrainingPlanPayload }
   | { kind: 'workouts'; workouts: ProposeWorkoutsPayload }
   | { kind: 'error'; toolName: string; message: string }
 
@@ -218,6 +262,8 @@ export function looksLikeFakeToolNarration(text: string): boolean {
   const t = text.toLowerCase()
   return (
     t.includes('propose_goals') ||
+    t.includes('propose_profile') ||
+    t.includes('propose_training_plan') ||
     t.includes('propose_workout') ||
     t.includes('calling the tool') ||
     t.includes('call the tool') ||
@@ -245,11 +291,32 @@ export function getToolSchemaHint(toolName: string): string {
       '- each workout must include at least one of entries or cardioOptions.',
     ].join('\n')
   }
+  if (toolName === 'propose_profile') {
+    return [
+      'Strict schema reminder for propose_profile:',
+      '- arguments must be JSON object with { experience, availableDays, equipment, ... }.',
+      '- experience must be one of: "beginner", "intermediate", "advanced".',
+      '- availableDays must be integer 1-7.',
+      '- equipment must be a non-empty array of strings.',
+      '- sex, sessionMinutes, injuries, notes are optional (can be null).',
+    ].join('\n')
+  }
   if (toolName === 'propose_goals') {
     return [
       'Strict schema reminder for propose_goals:',
       '- arguments must be JSON object with { "text": string }.',
       '- text must be non-empty and <= 2000 chars.',
+    ].join('\n')
+  }
+  if (toolName === 'propose_training_plan') {
+    return [
+      'Strict schema reminder for propose_training_plan:',
+      '- arguments must be JSON object with { name, split, daysPerWeek, durationWeeks, focus, strategy }.',
+      '- name, split, focus: non-empty strings.',
+      '- daysPerWeek: integer 1-7.',
+      '- durationWeeks: integer 1-52.',
+      '- strategy: non-empty string, max 3000 chars. Cover progression, exercise priorities, deload timing.',
+      '- startDate: optional YYYY-MM-DD string or null.',
     ].join('\n')
   }
   if (toolName === 'edit_workout') {
@@ -483,6 +550,19 @@ export function resolveToolCall(tc: PendingTool, customExerciseIds: Set<string> 
   | { kind: 'card'; cardState: ToolCardState }
   | { kind: 'execute'; execution: ToolExecution }
   | { kind: 'error'; message: string; toolName: string } {
+  if (tc.name === 'propose_profile') {
+    try {
+      const raw = JSON.parse(tc.arguments)
+      const result = ProposeProfilePayloadSchema.safeParse(raw)
+      if (result.success) {
+        return { kind: 'card', cardState: { kind: 'profile', profile: result.data } }
+      }
+      const msg = result.error.issues[0]?.message ?? 'Invalid profile proposal'
+      return { kind: 'error', message: msg, toolName: tc.name }
+    } catch {
+      return { kind: 'error', message: 'Failed to parse profile proposal', toolName: tc.name }
+    }
+  }
   if (tc.name === 'propose_goals') {
     try {
       const raw = JSON.parse(tc.arguments)
@@ -494,6 +574,19 @@ export function resolveToolCall(tc: PendingTool, customExerciseIds: Set<string> 
       return { kind: 'error', message: msg, toolName: tc.name }
     } catch {
       return { kind: 'error', message: 'Failed to parse goals proposal', toolName: tc.name }
+    }
+  }
+  if (tc.name === 'propose_training_plan') {
+    try {
+      const raw = JSON.parse(tc.arguments)
+      const result = ProposeTrainingPlanPayloadSchema.safeParse(raw)
+      if (result.success) {
+        return { kind: 'card', cardState: { kind: 'trainingPlan', plan: result.data } }
+      }
+      const msg = result.error.issues[0]?.message ?? 'Invalid training plan proposal'
+      return { kind: 'error', message: msg, toolName: tc.name }
+    } catch {
+      return { kind: 'error', message: 'Failed to parse training plan proposal', toolName: tc.name }
     }
   }
   if (tc.name === 'propose_workout') {
