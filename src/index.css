@@ -266,6 +266,80 @@ html, body {
 
 /* ─── Fireworks ──────────────────────────────────────────────────────────── */
 
+/* ─── Rest Timer ─────────────────────────────────────────────────────── */
+
+.rest-timer {
+  position: fixed;
+  bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  padding: 6px 14px 6px 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+  z-index: 50;
+  transition: opacity 0.2s;
+}
+
+.rest-timer--expired {
+  border-color: var(--accent);
+  animation: rest-timer-pulse 1s ease-in-out 3;
+}
+
+@keyframes rest-timer-pulse {
+  0%, 100% { box-shadow: 0 2px 12px rgba(0,0,0,0.3); }
+  50% { box-shadow: 0 2px 18px var(--accent-dim); }
+}
+
+.rest-timer-ring {
+  flex-shrink: 0;
+}
+
+.rest-timer-progress {
+  transition: stroke-dashoffset 0.3s linear;
+}
+
+.rest-timer-time {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 2px 4px;
+  -webkit-tap-highlight-color: transparent;
+  line-height: 1;
+}
+
+.rest-timer-display {
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.rest-timer-hint {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rest-timer-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.3rem;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .fireworks-overlay {
   position: fixed;
   top: 40%;

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { getWorkoutsByDate, saveWorkout, deleteWorkout } from '../lib/db.ts'
 import { getToday } from '../lib/context.ts'
-import { getExerciseName } from '../data/exercises.ts'
+import { getExerciseName, getExercise } from '../data/exercises.ts'
 import { formatDateLabel, formatSetLabel, addDays } from '../lib/formatters.ts'
 import ExerciseTip from '../components/ExerciseTip.tsx'
 import ExercisePicker from '../components/ExercisePicker.tsx'
 import Fireworks from '../components/Fireworks.tsx'
 import DebriefModal from '../components/DebriefModal.tsx'
+import RestTimer, { getRestDuration } from '../components/RestTimer.tsx'
 import {
   getWorkoutStatus,
   isWorkoutCompleted,
@@ -36,6 +37,8 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
   const [swapTarget, setSwapTarget] = useState<{ workoutId: number; entryIdx: number; exerciseId: string } | null>(null)
   const [animatingWorkoutId, setAnimatingWorkoutId] = useState<number | null>(null)
   const [showDebriefModal, setShowDebriefModal] = useState<number | null>(null)
+  const [restTimer, setRestTimer] = useState<{ duration: number; exerciseName: string; key: number } | null>(null)
+  const restTimerKeyRef = useRef(0)
   const noteSaveTimersRef = useRef<Record<string, number>>({})
 
   async function loadToday() {
@@ -182,12 +185,16 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
     const workout = workouts.find((w) => w.id === workoutId)
     if (!workout || !workout.entries) return
 
-    const updatedEntries = workout.entries.map((entry, ei) => {
-      if (ei !== entryIdx) return entry
+    const entry = workout.entries[entryIdx]
+    const set = entry?.sets[setIdx]
+    const wasAlreadyLogged = set && isSetCompleted(set)
+
+    const updatedEntries = workout.entries.map((e, ei) => {
+      if (ei !== entryIdx) return e
       return {
-        ...entry,
-        sets: entry.sets.map((set, si) =>
-          si !== setIdx ? set : { ...set, difficulty: nextDifficulty(set.difficulty, desired) },
+        ...e,
+        sets: e.sets.map((s, si) =>
+          si !== setIdx ? s : { ...s, difficulty: nextDifficulty(s.difficulty, desired) },
         ),
       }
     })
@@ -195,6 +202,15 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
     const updated: Workout = { ...workout, entries: updatedEntries }
     setWorkouts((prev) => prev.map((w) => (w.id === workoutId ? updated : w)))
     void persistWorkout(updated)
+
+    // Start rest timer when logging a set (not when un-logging)
+    const newDifficulty = nextDifficulty(set?.difficulty, desired)
+    if (!wasAlreadyLogged && newDifficulty && entry) {
+      const exercise = getExercise(entry.exerciseId)
+      const duration = getRestDuration(exercise?.tags ?? [])
+      restTimerKeyRef.current += 1
+      setRestTimer({ duration, exerciseName: getExerciseName(entry.exerciseId), key: restTimerKeyRef.current })
+    }
   }
 
   function updatePlannedSet(
@@ -734,6 +750,14 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
           )
         })}
       </div>
+
+      {restTimer && (
+        <RestTimer
+          key={restTimer.key}
+          duration={restTimer.duration}
+          onDismiss={() => setRestTimer(null)}
+        />
+      )}
 
       {swapTarget && (
         <ExercisePicker
