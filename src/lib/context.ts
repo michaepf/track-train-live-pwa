@@ -381,8 +381,7 @@ Reference the user's profile (hard constraints), goals (aspirations), and traini
 
 For user-facing text responses:
 - Do not use D0/D1/D2 labels in final wording; use real dates or weekday names.
-- Do not use markdown tables.
-- Prefer short plain text sections or bullet lists.`,
+- Prefer short plain text sections or bullet lists. Use markdown tables only when comparing structured data.`,
 }
 
 const TOOL_INSTRUCTIONS: Record<ConvMode, string> = {
@@ -412,7 +411,7 @@ When editing: call \`edit_workout\` with a \`workoutId\` and set-level patches o
 
 When swapping: call \`swap_exercise\` with \`workoutId\`, \`entryIndex\`, and \`toExerciseId\`. Use \`entryIndex\` from the \`E0/E1\` mapping in "Existing Workouts in Planning Window". Never swap an entry that is already in progress (has any set with \`difficulty\`).
 
-Do not output markdown tables or D-label shorthand in user-visible text.`,
+Do not use D-label shorthand in user-visible text.`,
 }
 
 /**
