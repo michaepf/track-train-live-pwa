@@ -272,13 +272,8 @@ export function looksLikeFakeToolNarration(text: string): boolean {
   )
 }
 
-export function addDays(date: string, days: number): string {
-  const d = new Date(`${date}T12:00:00`)
-  d.setDate(d.getDate() + days)
-  return d.toLocaleDateString('en-CA', {
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-  })
-}
+// Re-export from formatters for backward compatibility
+export { addDays } from './formatters.ts'
 
 export function getToolSchemaHint(toolName: string): string {
   if (toolName === 'propose_workout') {

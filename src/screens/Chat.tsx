@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { streamChat, MODELS } from '../lib/api.ts'
 import type { ModelTier } from '../lib/api.ts'
-import { getExerciseName, registerExerciseCatalog } from '../data/exercises.ts'
+import { registerExerciseCatalog } from '../data/exercises.ts'
 import {
   buildSystemPrompt,
   buildHistoryContext,
@@ -21,17 +21,13 @@ import {
   getTrainingPlan,
   saveTrainingPlan,
   saveWorkout,
-  getWorkoutById,
   saveConversation,
   listConversations,
   listWorkouts,
-  deleteWorkout,
   getSummary,
   getSetting,
   setSetting,
   getCustomExercises,
-  saveCustomExercise,
-  deleteCustomExercise,
 } from '../lib/db.ts'
 import type { Exercise } from '../data/exercises.ts'
 import {
@@ -39,8 +35,6 @@ import {
   UserProfileSchema,
   TrainingPlanSchema,
   WorkoutSchema,
-  isEntryInProgress,
-  isSetCompleted,
 } from '../lib/schemas/index.ts'
 import type {
   Goals,
@@ -73,11 +67,11 @@ import {
   EDIT_WORKOUT_TOOL,
   SWAP_EXERCISE_TOOL,
   looksLikeFakeToolNarration,
-  addDays,
   getToolSchemaHint,
   resolveToolCall,
 } from '../lib/chatTools.ts'
-import type { PendingTool, ToolCardState, ToolExecution } from '../lib/chatTools.ts'
+import type { PendingTool, ToolCardState } from '../lib/chatTools.ts'
+import { executeToolAction, buildEditWorkoutFollowupPrompt, buildSwapExerciseFollowupPrompt } from '../lib/toolExecutors.ts'
 
 const MAX_FAKE_TOOL_RETRIES = 2
 const MAX_TOOL_VALIDATION_RETRIES = 2
@@ -86,63 +80,6 @@ const ONBOARDING_WELCOME_MESSAGE = `Welcome to Track Train Live! I'm your AI per
 Here's how it works: we'll start with a short conversation about your goals and fitness background. From there, I'll build a personalised workout plan — view upcoming sessions on the **Workouts** tab. On the day of a workout, use the **Today** tab to record how it went. Past sessions are saved to the **Log** tab. Come back here anytime to adjust your plan.
 
 To get started: what's your current experience with exercise or training? Are you just getting started, coming back after a break, or already training consistently?`
-
-function buildEditWorkoutFollowupPrompt(outcome: string): string {
-  try {
-    const parsed = JSON.parse(outcome) as {
-      workoutId?: number
-      changedSetCount?: number
-      changedSets?: Array<{
-        entryIndex: number
-        setIndex: number
-        exerciseId: string
-        changes: string[]
-      }>
-    }
-    const changes = parsed.changedSets ?? []
-    if (changes.length === 0) {
-      return (
-        `edit_workout completed for workout ${parsed.workoutId ?? 'unknown'}, but there were no effective value changes. ` +
-        'Tell the user no set values changed.'
-      )
-    }
-
-    const lines = changes.map((c) => {
-      const changeText = c.changes.join('; ')
-      return `- E${c.entryIndex} S${c.setIndex + 1} (${c.exerciseId}): ${changeText}`
-    })
-    return [
-      `edit_workout applied to workout ${parsed.workoutId ?? 'unknown'}.`,
-      `Changed sets (${parsed.changedSetCount ?? changes.length}):`,
-      ...lines,
-      'Respond to the user with a concise natural-language confirmation that references these exact changes.',
-    ].join('\n')
-  } catch {
-    return (
-      'edit_workout completed. Read the tool result carefully and give the user a concise, specific summary of what changed.'
-    )
-  }
-}
-
-function buildSwapExerciseFollowupPrompt(outcome: string): string {
-  try {
-    const parsed = JSON.parse(outcome) as {
-      workoutId?: number
-      entryIndex?: number
-      fromName?: string
-      toName?: string
-      fromExerciseId?: string
-      toExerciseId?: string
-    }
-    return [
-      `swap_exercise applied to workout ${parsed.workoutId ?? 'unknown'}.`,
-      `Entry E${parsed.entryIndex ?? '?'} changed from ${parsed.fromName ?? parsed.fromExerciseId ?? 'unknown'} to ${parsed.toName ?? parsed.toExerciseId ?? 'unknown'}.`,
-      'Respond to the user with a concise natural-language confirmation of this change.',
-    ].join('\n')
-  } catch {
-    return 'swap_exercise completed. Read the tool result and give a concise user-facing confirmation.'
-  }
-}
 
 // ─── Message rendering ─────────────────────────────────────────────────────────
 
@@ -366,178 +303,6 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
 
   // ─── Streaming ───────────────────────────────────────────────────────────────
 
-  async function executeToolAction(exec: ToolExecution): Promise<string> {
-    if (exec.kind === 'add_exercise') {
-      // Duplicate check — ID collision
-      if (customExercises.some((e) => e.id === exec.exercise.id)) {
-        return `Exercise with id "${exec.exercise.id}" already exists in the catalog.`
-      }
-      // Duplicate check — name collision (case-insensitive)
-      const nameLower = exec.exercise.name.toLowerCase()
-      const nameMatch = customExercises.find((e) => e.name.toLowerCase() === nameLower)
-      if (nameMatch) {
-        return `An exercise called "${nameMatch.name}" already exists (id: ${nameMatch.id}). Use that id instead of adding a duplicate.`
-      }
-      await saveCustomExercise(exec.exercise)
-      const updated = await getCustomExercises()
-      setCustomExercises(updated)
-      registerExerciseCatalog(updated)
-      return `Added exercise "${exec.exercise.name}" (${exec.exercise.id}) to your catalog.`
-    }
-
-    if (exec.kind === 'remove_exercise') {
-      await deleteCustomExercise(exec.id)
-      const updated = await getCustomExercises()
-      setCustomExercises(updated)
-      registerExerciseCatalog(updated)
-      return `Removed exercise "${exec.id}" from your catalog.`
-    }
-
-    if (exec.kind === 'edit_workout') {
-      const workout = await getWorkoutById(exec.workoutId)
-      if (!workout) throw new Error(`Workout ${exec.workoutId} not found`)
-      if (workout.status === 'completed') throw new Error(`Workout ${exec.workoutId} is completed and cannot be edited`)
-
-      let updatedEntries = workout.entries ? [...workout.entries] : []
-      const changedSets: Array<{
-        entryIndex: number
-        setIndex: number
-        exerciseId: string
-        changes: string[]
-      }> = []
-      for (const entryPatch of exec.patches.entries ?? []) {
-        const entry = updatedEntries[entryPatch.entryIndex]
-        if (!entry) throw new Error(`Entry index ${entryPatch.entryIndex} not found`)
-        let updatedSets = [...entry.sets]
-        for (const setPatch of entryPatch.sets ?? []) {
-          const set = updatedSets[setPatch.setIndex]
-          if (!set) throw new Error(`Set index ${setPatch.setIndex} not found in entry ${entryPatch.entryIndex}`)
-          if (isSetCompleted(set)) throw new Error(`Set ${setPatch.setIndex} in entry ${entryPatch.entryIndex} already has difficulty logged`)
-          const nextSet = {
-            ...set,
-            ...(setPatch.plannedReps !== undefined ? { plannedReps: setPatch.plannedReps } : {}),
-            ...(setPatch.plannedWeight !== undefined ? { plannedWeight: setPatch.plannedWeight } : {}),
-            ...(setPatch.targetSeconds !== undefined ? { targetSeconds: setPatch.targetSeconds } : {}),
-          }
-          const changes: string[] = []
-          if (setPatch.plannedReps !== undefined && set.plannedReps !== nextSet.plannedReps) {
-            changes.push(`plannedReps ${set.plannedReps ?? 'unset'} -> ${nextSet.plannedReps ?? 'unset'}`)
-          }
-          if (setPatch.plannedWeight !== undefined && set.plannedWeight !== nextSet.plannedWeight) {
-            changes.push(`plannedWeight ${set.plannedWeight ?? 'unset'} -> ${nextSet.plannedWeight ?? 'unset'}`)
-          }
-          if (setPatch.targetSeconds !== undefined && set.targetSeconds !== nextSet.targetSeconds) {
-            changes.push(`targetSeconds ${set.targetSeconds ?? 'unset'} -> ${nextSet.targetSeconds ?? 'unset'}`)
-          }
-          if (changes.length > 0) {
-            changedSets.push({
-              entryIndex: entryPatch.entryIndex,
-              setIndex: setPatch.setIndex,
-              exerciseId: entry.exerciseId,
-              changes,
-            })
-          }
-          updatedSets = [
-            ...updatedSets.slice(0, setPatch.setIndex),
-            nextSet,
-            ...updatedSets.slice(setPatch.setIndex + 1),
-          ]
-        }
-        updatedEntries = [
-          ...updatedEntries.slice(0, entryPatch.entryIndex),
-          { ...entry, sets: updatedSets },
-          ...updatedEntries.slice(entryPatch.entryIndex + 1),
-        ]
-      }
-
-      const updated = {
-        ...workout,
-        entries: updatedEntries,
-      }
-      await saveWorkout(updated)
-      return JSON.stringify({
-        ok: true,
-        action: 'edit_workout',
-        workoutId: exec.workoutId,
-        changedSetCount: changedSets.length,
-        changedSets,
-      })
-    }
-
-    if (exec.kind === 'swap_exercise') {
-      const workout = await getWorkoutById(exec.workoutId)
-      if (!workout) throw new Error(`Workout ${exec.workoutId} not found`)
-      if (workout.status === 'completed') throw new Error(`Workout ${exec.workoutId} is completed and cannot be edited`)
-
-      const entries = workout.entries ? [...workout.entries] : []
-      const entry = entries[exec.entryIndex]
-      if (!entry) throw new Error(`Entry index ${exec.entryIndex} not found`)
-      if (isEntryInProgress(entry)) {
-        throw new Error(`Entry ${exec.entryIndex} already has progress and cannot be swapped`)
-      }
-      const isKnownExercise = customExercises.some((e) => e.id === exec.toExerciseId)
-      if (!isKnownExercise) {
-        throw new Error(`Unknown exerciseId: ${exec.toExerciseId}`)
-      }
-
-      const oldName = getExerciseName(entry.exerciseId)
-      const newName = getExerciseName(exec.toExerciseId)
-      entries[exec.entryIndex] = {
-        ...entry,
-        exerciseId: exec.toExerciseId,
-        aiNotes: undefined,
-      }
-      const updated = {
-        ...workout,
-        entries,
-        feedback: [
-          ...(workout.feedback ?? []),
-          {
-            source: 'ai' as const,
-            note: `Swapped ${oldName} -> ${newName}`,
-            timestamp: new Date().toISOString(),
-          },
-        ],
-      }
-      await saveWorkout(updated)
-      return JSON.stringify({
-        ok: true,
-        action: 'swap_exercise',
-        workoutId: exec.workoutId,
-        entryIndex: exec.entryIndex,
-        fromExerciseId: entry.exerciseId,
-        toExerciseId: exec.toExerciseId,
-        fromName: oldName,
-        toName: newName,
-      })
-    }
-
-    const allWorkouts = await listWorkouts(10000)
-    const today = getToday()
-
-    if (exec.kind === 'delete_future_workouts') {
-      const start = exec.fromDate ?? (exec.includeToday ? today : addDays(today, 1))
-      const end = exec.toDate ?? '9999-12-31'
-
-      let deleted = 0
-      let skipped = 0
-      for (const workout of allWorkouts) {
-        if (workout.date < start || workout.date > end) continue
-        if (!workout.id) continue
-        try {
-          await deleteWorkout(workout.id)
-          deleted += 1
-        } catch {
-          skipped += 1
-        }
-      }
-
-      return `Deleted ${deleted} future workout${deleted === 1 ? '' : 's'} (skipped ${skipped} completed).`
-    }
-
-    return 'No action.'
-  }
-
   /**
    * Core stream function. All mutable state is passed explicitly to avoid
    * stale closure bugs — mode, goals, conv all change across the session.
@@ -674,7 +439,13 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
             setToolCard({ kind: 'error', toolName: resolved.toolName, message: resolved.message })
           } else if (resolved.kind === 'execute') {
             try {
-              const outcome = await executeToolAction(resolved.execution)
+              const outcome = await executeToolAction(resolved.execution, {
+                customExercises: currentCustomExercises,
+                onExercisesChanged: (updated) => {
+                  setCustomExercises(updated)
+                  registerExerciseCatalog(updated)
+                },
+              })
               finalMessages = [
                 ...finalMessages,
                 {

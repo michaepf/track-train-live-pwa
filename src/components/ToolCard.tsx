@@ -1,16 +1,8 @@
 import { useState } from 'react'
 import MarkdownText from './MarkdownText.tsx'
 import ExerciseTip from './ExerciseTip.tsx'
+import { formatSetLabel, summarizeWorkout } from '../lib/formatters.ts'
 import type { ProposeProfilePayload, ProposeTrainingPlanPayload, ProposeWorkoutsPayload } from '../lib/schemas/index.ts'
-
-function setLabel(set: { plannedReps?: number; plannedWeight?: number; targetSeconds?: number; plannedDuration?: string }): string {
-  const parts: string[] = []
-  if (set.plannedReps) parts.push(`${set.plannedReps} reps`)
-  if (set.targetSeconds) parts.push(`${set.targetSeconds}s`)
-  if (set.plannedDuration) parts.push(set.plannedDuration)
-  if (set.plannedWeight) parts.push(`@ ${set.plannedWeight} lb`)
-  return parts.join(' ') || '—'
-}
 
 // ─── propose_goals card ────────────────────────────────────────────────────────
 
@@ -214,21 +206,6 @@ interface ProposeWorkoutCardProps {
   disabled?: boolean
 }
 
-function summarizeWorkout(workout: ProposeWorkoutsPayload[number]): string {
-  const parts: string[] = []
-  const entryCount = workout.entries?.length ?? 0
-  const cardioCount = workout.cardioOptions?.length ?? 0
-
-  if (entryCount > 0) {
-    parts.push(`${entryCount} exercise${entryCount === 1 ? '' : 's'}`)
-  }
-  if (cardioCount > 0) {
-    parts.push(`${cardioCount} cardio option${cardioCount === 1 ? '' : 's'}`)
-  }
-
-  return parts.join(' • ') || 'No details'
-}
-
 export function ProposeWorkoutCard({
   workouts,
   onAccept,
@@ -286,7 +263,7 @@ export function ProposeWorkoutCard({
                       <div className="workout-card-entry-name"><ExerciseTip exerciseId={entry.exerciseId} /></div>
                       <div className="workout-card-entry-sets">
                         {entry.sets.map((set, si) => (
-                          <span key={si} className="workout-card-set-chip">{setLabel(set)}</span>
+                          <span key={si} className="workout-card-set-chip">{formatSetLabel(set)}</span>
                         ))}
                       </div>
                       {entry.aiNotes && <div className="workout-card-entry-notes">{entry.aiNotes}</div>}

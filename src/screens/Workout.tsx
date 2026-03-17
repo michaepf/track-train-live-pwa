@@ -1,35 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { listWorkouts, deleteWorkout } from '../lib/db.ts'
 import ExerciseTip from '../components/ExerciseTip.tsx'
+import { formatDateLabel, formatSetLabel, summarizeWorkout, groupByDate } from '../lib/formatters.ts'
 import { isWorkoutCompleted, type Workout } from '../lib/schemas/index.ts'
-
-function formatDateLabel(date: string): string {
-  const d = new Date(`${date}T12:00:00`)
-  return d.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
-
-function summarizeWorkout(workout: Workout): string {
-  const exerciseCount = workout.entries?.length ?? 0
-  const cardioCount = workout.cardioOptions?.length ?? 0
-  const parts: string[] = []
-  if (exerciseCount > 0) parts.push(`${exerciseCount} exercise${exerciseCount === 1 ? '' : 's'}`)
-  if (cardioCount > 0) parts.push(`${cardioCount} cardio option${cardioCount === 1 ? '' : 's'}`)
-  return parts.join(' • ') || 'No details'
-}
-
-function setLabel(set: { plannedReps?: number; plannedWeight?: number; targetSeconds?: number; plannedDuration?: string }): string {
-  const parts: string[] = []
-  if (set.plannedReps) parts.push(`${set.plannedReps} reps`)
-  if (set.targetSeconds) parts.push(`${set.targetSeconds}s`)
-  if (set.plannedDuration) parts.push(set.plannedDuration)
-  if (set.plannedWeight) parts.push(`@ ${set.plannedWeight} lb`)
-  return parts.join(' ') || '—'
-}
 
 function cardKey(workout: Workout): string {
   return String(workout.id ?? `${workout.date}-${workout.workoutType}`)
@@ -85,13 +58,7 @@ export default function Workout() {
   }
 
   const grouped = useMemo(() => {
-    const map = new Map<string, Workout[]>()
-    for (const w of workouts) {
-      const list = map.get(w.date) ?? []
-      list.push(w)
-      map.set(w.date, list)
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    return groupByDate(workouts).sort((a, b) => a[0].localeCompare(b[0]))
   }, [workouts])
 
   return (
@@ -119,7 +86,7 @@ export default function Workout() {
       <div className="workouts-list">
         {grouped.map(([date, dayWorkouts]) => (
           <section key={date} className="workouts-day">
-            <h2 className="workouts-date">{formatDateLabel(date)}</h2>
+            <h2 className="workouts-date">{formatDateLabel(date, 'short')}</h2>
             {dayWorkouts.map((workout) => {
               const key = cardKey(workout)
               const expanded = expandedIds.has(key)
@@ -141,7 +108,7 @@ export default function Workout() {
                           <div className="workout-card-entry-sets">
                             {entry.sets.map((set, si) => (
                               <span key={si} className="workout-card-set-chip">
-                                {setLabel(set)}
+                                {formatSetLabel(set)}
                               </span>
                             ))}
                           </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { getWorkoutsByDate, saveWorkout, deleteWorkout } from '../lib/db.ts'
 import { getToday } from '../lib/context.ts'
 import { getExerciseName } from '../data/exercises.ts'
+import { formatDateLabel, formatSetLabel, addDays } from '../lib/formatters.ts'
 import ExerciseTip from '../components/ExerciseTip.tsx'
 import ExercisePicker from '../components/ExercisePicker.tsx'
 import {
@@ -15,37 +16,6 @@ import {
 } from '../lib/schemas/index.ts'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
-
-function formatDateLabel(date: string): string {
-  const d = new Date(`${date}T12:00:00`)
-  return d.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
-
-function addDays(date: string, n: number): string {
-  const d = new Date(`${date}T12:00:00`)
-  d.setDate(d.getDate() + n)
-  return d.toLocaleDateString('en-CA')
-}
-
-
-function setTargetLabel(set: {
-  plannedReps?: number
-  targetSeconds?: number
-  plannedDuration?: string
-  plannedWeight?: number
-}): string {
-  const parts: string[] = []
-  if (set.plannedReps) parts.push(`${set.plannedReps} reps`)
-  if (set.targetSeconds) parts.push(`${set.targetSeconds}s`)
-  if (set.plannedDuration) parts.push(set.plannedDuration)
-  if (set.plannedWeight) parts.push(`@ ${set.plannedWeight} lb`)
-  return parts.join(' • ') || 'Set'
-}
 
 function nextDifficulty(current: Difficulty | undefined, desired: Difficulty): Difficulty | undefined {
   return current === desired ? undefined : desired
@@ -662,7 +632,7 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
                           </div>
                         ) : (
                           <span className={`today-set-label${isSetCompleted(set) && editingWorkoutId === workout.id ? ' today-set-label--locked' : ''}`}>
-                            Set {setIdx + 1}: {setTargetLabel(set)}
+                            Set {setIdx + 1}: {formatSetLabel(set)}
                           </span>
                         )}
                         {!isEditing && (
