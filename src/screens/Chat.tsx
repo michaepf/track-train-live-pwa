@@ -75,7 +75,7 @@ import { executeToolAction, buildEditWorkoutFollowupPrompt, buildSwapExerciseFol
 
 const MAX_FAKE_TOOL_RETRIES = 2
 const MAX_TOOL_VALIDATION_RETRIES = 2
-const ONBOARDING_WELCOME_MESSAGE = `Welcome to Track Train Live! I'm your AI personal trainer.
+const ONBOARDING_WELCOME_MESSAGE = `Welcome to Rubato Coach! I'm your AI personal trainer.
 
 Here's how it works: we'll start with a short conversation about your goals and fitness background. From there, I'll build a personalised workout plan — view upcoming sessions on the **Workouts** tab. On the day of a workout, use the **Today** tab to record how it went. Past sessions are saved to the **Log** tab. Come back here anytime to adjust your plan.
 

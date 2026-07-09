@@ -66,7 +66,7 @@ function FirstTimeModal({ onDismiss }: { onDismiss: () => void }) {
   return (
     <div className="modal-overlay">
       <div className="modal-card">
-        <h2 className="modal-title">Welcome to Track Train Live!</h2>
+        <h2 className="modal-title">Welcome to Rubato Coach!</h2>
         <div className="modal-content">
           <p>
             <strong>Important:</strong> All your data — workouts, chat history, and goals — is stored locally on this device only.
@@ -97,7 +97,7 @@ function LoginScreen({ error }: { error: string | null }) {
   return (
     <div className="auth-screen">
       <div className="auth-card">
-        <h1 className="auth-title">Track Train Live</h1>
+        <h1 className="auth-title">Rubato Coach</h1>
         <p className="auth-subtitle">
           An AI-powered personal training app. Chat with your trainer to plan
           workouts, then log your sessions as you go.

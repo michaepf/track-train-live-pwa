@@ -480,7 +480,7 @@ export function buildSystemPrompt(
     : ''
 
   const sections = [
-    `# Track Train Live — AI Trainer`,
+    `# Rubato Coach — AI Trainer`,
     `Today: ${today}`,
     setupSection,
     `## Your Role\n\n${ROLE_INSTRUCTIONS[mode]}`,

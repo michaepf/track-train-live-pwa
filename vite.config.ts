@@ -12,8 +12,8 @@ export default defineConfig({
         clientsClaim: true,
       },
       manifest: {
-        name: 'Track Train Live',
-        short_name: 'TrackTrain',
+        name: 'Rubato Coach',
+        short_name: 'Rubato',
         description: 'AI-powered personal training tracker',
         theme_color: '#1a1a1a',
         background_color: '#1a1a1a',
