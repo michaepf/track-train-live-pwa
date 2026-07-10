@@ -29,14 +29,17 @@ export default function History() {
   const grouped = groupByDate(workouts)
 
   return (
-    <div className="screen-content">
-      <div className="workouts-header">
-        <h1>Log</h1>
-        <button className="workouts-refresh-btn" onClick={load} disabled={loading}>
-          {loading ? 'Loading...' : 'Refresh'}
-        </button>
+    <div className="workouts-screen">
+      <div className="workouts-header-fixed">
+        <div className="workouts-header">
+          <h1 className="tab-header-title">Log</h1>
+          <button className="workouts-refresh-btn" onClick={load} disabled={loading}>
+            {loading ? 'Loading...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
+      <div className="workouts-scroll-body">
       {error && <p className="goals-error">{error}</p>}
 
       {!loading && workouts.length === 0 && (
@@ -71,6 +74,7 @@ export default function History() {
             })}
           </div>
         ))}
+      </div>
       </div>
     </div>
   )

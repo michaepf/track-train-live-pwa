@@ -257,3 +257,11 @@ export function buildSwapExerciseFollowupPrompt(outcome: string): string {
     return 'swap_exercise completed. Read the tool result and give a concise user-facing confirmation.'
   }
 }
+
+export function buildDeleteFutureWorkoutsFollowupPrompt(outcome: string): string {
+  return [
+    `delete_future_workouts completed: ${outcome}`,
+    'If the user asked you to replace or change these workouts, immediately continue now by calling propose_workout with the replacement plan — do not stop and wait for the user to ask again.',
+    'If the user only asked you to remove workouts with no replacement, just give a brief confirmation instead.',
+  ].join('\n')
+}

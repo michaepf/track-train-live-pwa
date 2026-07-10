@@ -355,8 +355,11 @@ export default function Settings() {
   const planReviewNeeded = needsPlanReview(planData, goals)
 
   return (
-    <div className="screen-content">
-      <h1>Settings</h1>
+    <div className="settings-screen">
+      <div className="settings-header-fixed">
+        <h1 className="tab-header-title">Settings</h1>
+      </div>
+      <div className="settings-scroll-body">
 
       {/* Profile */}
       <section className="settings-section">
@@ -610,6 +613,7 @@ export default function Settings() {
           @michael-flynn.bsky.social
         </a>
       </p>
+      </div>
     </div>
   )
 }

@@ -71,7 +71,7 @@ import {
   resolveToolCall,
 } from '../lib/chatTools.ts'
 import type { PendingTool, ToolCardState } from '../lib/chatTools.ts'
-import { executeToolAction, buildEditWorkoutFollowupPrompt, buildSwapExerciseFollowupPrompt } from '../lib/toolExecutors.ts'
+import { executeToolAction, buildEditWorkoutFollowupPrompt, buildSwapExerciseFollowupPrompt, buildDeleteFutureWorkoutsFollowupPrompt } from '../lib/toolExecutors.ts'
 
 const MAX_FAKE_TOOL_RETRIES = 2
 const MAX_TOOL_VALIDATION_RETRIES = 2
@@ -111,9 +111,13 @@ interface ChatProps {
   isActive?: boolean
   seedMessage?: string
   onSeedConsumed?: () => void
+  /** 'overlay' renders as a floating bottom-sheet (see App.tsx's chat bubble) instead of filling the screen. */
+  variant?: 'full' | 'overlay'
+  /** Only used when variant is 'overlay' — closes the sheet without leaving the current screen. */
+  onClose?: () => void
 }
 
-export default function Chat({ onStreamingChange, onNewResponse, isActive = true, seedMessage, onSeedConsumed }: ChatProps) {
+export default function Chat({ onStreamingChange, onNewResponse, isActive = true, seedMessage, onSeedConsumed, variant = 'full', onClose }: ChatProps) {
   const apiKey = useApiKey()
 
   const [goals, setGoals] = useState<Goals | null>(null)
@@ -207,6 +211,12 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamingContent])
+
+  // Jump to the latest message whenever the chat becomes visible again
+  // (e.g. the overlay is opened, or the Chat tab is switched to).
+  useEffect(() => {
+    if (isActive) bottomRef.current?.scrollIntoView({ behavior: 'auto' })
+  }, [isActive])
 
   // Cleanup on unmount — abort any in-flight stream
   useEffect(() => {
@@ -454,12 +464,20 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
                   toolCallId: tc.id,
                 },
               ]
-              if (resolved.execution.kind === 'edit_workout' || resolved.execution.kind === 'swap_exercise') {
-                // Add a hidden nudge with explicit extracted details to avoid generic confirmations.
+              if (
+                resolved.execution.kind === 'edit_workout' ||
+                resolved.execution.kind === 'swap_exercise' ||
+                resolved.execution.kind === 'delete_future_workouts'
+              ) {
+                // Add a hidden nudge with explicit extracted details to avoid generic confirmations,
+                // and — for delete_future_workouts — to keep the model going into propose_workout
+                // instead of stopping after the delete step.
                 const followupPrompt =
                   resolved.execution.kind === 'edit_workout'
                     ? buildEditWorkoutFollowupPrompt(outcome)
-                    : buildSwapExerciseFollowupPrompt(outcome)
+                    : resolved.execution.kind === 'swap_exercise'
+                      ? buildSwapExerciseFollowupPrompt(outcome)
+                      : buildDeleteFutureWorkoutsFollowupPrompt(outcome)
                 const threadWithNudge: Message[] = [
                   ...finalMessages,
                   {
@@ -841,13 +859,20 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
       (toolCard?.kind === 'profile' || toolCard?.kind === 'goals' || toolCard?.kind === 'trainingPlan' || toolCard?.kind === 'workouts'))
 
   return (
-    <div className="chat-screen">
+    <div className={`chat-screen${variant === 'overlay' ? ' chat-screen--overlay' : ''}`}>
       {/* Header */}
       <div className="chat-header">
-        <span className="chat-mode-label">
-          {mode === 'onboarding' ? 'Setup' : mode === 'goal_review' ? 'Goal Review' : 'Planning'}
-        </span>
+        {variant === 'overlay' ? (
+          <span className="chat-mode-label">Chat</span>
+        ) : (
+          <h1 className="tab-header-title">Chat</h1>
+        )}
         <div className="chat-header-right">
+          {variant === 'overlay' && (
+            <button className="chat-close-btn" onClick={onClose} aria-label="Close chat">
+              ✕
+            </button>
+          )}
           <button className="chat-menu-btn" onClick={() => setMenuOpen((o) => !o)} aria-label="Chat options">
             ⋮
           </button>
@@ -855,22 +880,26 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
             <>
               <div className="chat-menu-backdrop" onClick={closeMenu} />
               <div className="chat-menu-dropdown">
-                <div className="chat-menu-section-label">Model</div>
-                {(['affordable', 'premium'] as ModelTier[]).map((tier) => (
-                  <button
-                    key={tier}
-                    className={`chat-menu-option${model === MODELS[tier] ? ' chat-menu-option--active' : ''}`}
-                    onClick={() => { handleModelToggle(tier); closeMenu() }}
-                  >
-                    <span className="chat-menu-option-name">
-                      {tier === 'affordable' ? 'Affordable' : 'Premium'}
-                    </span>
-                    <span className="chat-menu-option-desc">
-                      {MODEL_DISPLAY_NAMES[tier]}
-                    </span>
-                  </button>
-                ))}
-                <div className="chat-menu-divider" />
+                {variant !== 'overlay' && (
+                  <>
+                    <div className="chat-menu-section-label">Model</div>
+                    {(['affordable', 'premium'] as ModelTier[]).map((tier) => (
+                      <button
+                        key={tier}
+                        className={`chat-menu-option${model === MODELS[tier] ? ' chat-menu-option--active' : ''}`}
+                        onClick={() => { handleModelToggle(tier); closeMenu() }}
+                      >
+                        <span className="chat-menu-option-name">
+                          {tier === 'affordable' ? 'Affordable' : 'Premium'}
+                        </span>
+                        <span className="chat-menu-option-desc">
+                          {MODEL_DISPLAY_NAMES[tier]}
+                        </span>
+                      </button>
+                    ))}
+                    <div className="chat-menu-divider" />
+                  </>
+                )}
                 {!resetArmed ? (
                   <button
                     className="chat-menu-option chat-menu-option--danger"

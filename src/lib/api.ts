@@ -176,7 +176,7 @@ function isAnthropicModel(model: string): boolean {
 
 // TODO: Remove after debugging tool call issues. Set to true to use non-streaming
 // mode which returns the full response at once, bypassing SSE parsing entirely.
-const DEBUG_NON_STREAM = true
+const DEBUG_NON_STREAM = false
 
 // TODO: Remove — logs every SSE delta to help debug streaming tool calls.
 const DEBUG_LOG_SSE = false

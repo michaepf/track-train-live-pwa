@@ -86,11 +86,11 @@ export const PROPOSE_WORKOUT_TOOL = {
             date: { type: 'string', description: 'Workout date in YYYY-MM-DD format within D0-D6.' },
             workoutType: { type: 'string' },
             session: { type: 'string' },
-            warmup: { type: 'object', description: 'Always include on strength workouts. Shape: { cardio: { type: string, duration: string, intensity: string }, mobility: [{ name: string, reps?: string, duration?: string }] }' },
+            warmup: { type: 'object', description: 'Always include on strength workouts. Shape: { cardio?: { type: string, duration: string, intensity?: string }, mobility?: [{ name: string, reps?: string, duration?: string }] }, e.g. { cardio: { type: "bike", duration: "5 min" }, mobility: [{ name: "Leg swings", reps: "10 each side" }] }. mobility items only need a name — reps and duration are optional, include whichever applies.' },
             entries: { type: 'array', description: 'Array of { exerciseId: string, sets: [{ plannedReps?: number, plannedWeight?: number, targetSeconds?: number }] }. Include multiple set objects per exercise (typically 3).' },
-            cardioOptions: { type: 'array' },
+            cardioOptions: { type: 'array', description: 'Array of { label: string, target?: string }, e.g. [{ label: "Row", target: "20 min easy pace" }]. Use this for cardio-only workouts (in place of entries) or to offer a choice of cardio alongside strength entries — every workout needs at least one of entries or cardioOptions.' },
             cardioMode: { type: 'string', enum: ['pick_one', 'pick_many'] },
-            cooldown: { type: 'object', description: 'Always include on strength workouts. Shape: { stretching: [{ name: string, duration: string }] }' },
+            cooldown: { type: 'object', description: 'Always include on strength workouts. Shape: { stretching: [{ name: string, reps?: string, duration?: string }] }, e.g. { stretching: [{ name: "Hamstring stretch", duration: "30s per side" }] }. Each item only needs a name — reps and duration are optional, include whichever applies.' },
           },
           required: ['date', 'workoutType'],
         },
@@ -487,6 +487,8 @@ function normalizeWorkoutPayloads(candidate: unknown): unknown {
       ...(cardioMode === 'pick_one' || cardioMode === 'pick_many'
         ? { cardioMode }
         : {}),
+      ...(workout.warmup ? { warmup: workout.warmup } : {}),
+      ...(workout.cooldown ? { cooldown: workout.cooldown } : {}),
     }
   })
 }

@@ -341,31 +341,37 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
   }
 
   return (
-    <div className="screen-content">
-      <div className="today-header">
-        <h1>Today</h1>
+    <div className="today-screen">
+      <div className="today-header-fixed">
+        <div className="today-header">
+          <h1 className="tab-header-title">Today</h1>
+          <div className="today-date-nav">
+            <button className="today-nav-btn" onClick={() => setViewDate((d) => addDays(d, -1))}>‹</button>
+            <span className="today-date">{formatDateLabel(viewDate)}</span>
+            <button className="today-nav-btn" onClick={() => setViewDate((d) => addDays(d, 1))}>›</button>
+            {viewDate !== actualToday && (
+              <button className="today-today-btn" onClick={() => setViewDate(actualToday)}>Today</button>
+            )}
+          </div>
+          <button className="workouts-refresh-btn" onClick={loadToday} disabled={loading}>
+            {loading ? 'Loading...' : 'Refresh'}
+          </button>
+        </div>
       </div>
-      <div className="today-date-nav">
-        <button className="today-nav-btn" onClick={() => setViewDate((d) => addDays(d, -1))}>‹</button>
-        <span className="today-date">{formatDateLabel(viewDate)}</span>
-        <button className="today-nav-btn" onClick={() => setViewDate((d) => addDays(d, 1))}>›</button>
-        {viewDate !== actualToday && (
-          <button className="today-today-btn" onClick={() => setViewDate(actualToday)}>Today</button>
+
+      <div className="today-scroll-body">
+        {error && <p className="goals-error">{error}</p>}
+
+        {!loading && workouts.length === 0 && (
+          <p className="placeholder-text">
+            {viewDate === actualToday
+              ? 'No workouts planned for today. Ask Chat for a day-of workout or weekly plan.'
+              : 'No workouts planned for this day.'}
+          </p>
         )}
-      </div>
 
-      {error && <p className="goals-error">{error}</p>}
-
-      {!loading && workouts.length === 0 && (
-        <p className="placeholder-text">
-          {viewDate === actualToday
-            ? 'No workouts planned for today. Ask Chat for a day-of workout or weekly plan.'
-            : 'No workouts planned for this day.'}
-        </p>
-      )}
-
-      <div className="today-list">
-        {workouts.map((workout) => {
+        <div className="today-list">
+          {workouts.map((workout) => {
           const saveState = workout.id ? (saveStateByWorkout[workout.id] ?? 'idle') : 'idle'
           const status = getWorkoutStatus(workout)
           const manuallyCompleted = workout.status === 'completed'
@@ -749,6 +755,7 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
             </section>
           )
         })}
+        </div>
       </div>
 
       {restTimer && (

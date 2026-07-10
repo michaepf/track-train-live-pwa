@@ -62,21 +62,24 @@ export default function Workout() {
   }, [workouts])
 
   return (
-    <div className="screen-content">
-      <div className="workouts-header">
-        <h1>Workouts</h1>
-        <div className="workouts-header-actions">
-          {workouts.length > 0 && (
-            <button className="workouts-expand-btn" onClick={toggleAll}>
-              {allExpanded ? 'Collapse all' : 'Expand all'}
+    <div className="workouts-screen">
+      <div className="workouts-header-fixed">
+        <div className="workouts-header">
+          <h1 className="tab-header-title">Workouts</h1>
+          <div className="workouts-header-actions">
+            {workouts.length > 0 && (
+              <button className="workouts-expand-btn" onClick={toggleAll}>
+                {allExpanded ? 'Collapse all' : 'Expand all'}
+              </button>
+            )}
+            <button className="workouts-refresh-btn" onClick={loadWorkouts} disabled={loading}>
+              {loading ? 'Loading...' : 'Refresh'}
             </button>
-          )}
-          <button className="workouts-refresh-btn" onClick={loadWorkouts} disabled={loading}>
-            {loading ? 'Loading...' : 'Refresh'}
-          </button>
+          </div>
         </div>
       </div>
 
+      <div className="workouts-scroll-body">
       {error && <p className="goals-error">{error}</p>}
 
       {!loading && grouped.length === 0 && (
@@ -102,6 +105,33 @@ export default function Workout() {
 
                   {expanded && (
                     <div className="workout-card-detail">
+                      {workout.warmup && (() => {
+                        const w = workout.warmup
+                        const cardioDesc = !Array.isArray(w.cardio) && w.cardio ? w.cardio : null
+                        const cardioItems = Array.isArray(w.cardio) ? w.cardio : null
+                        const mobility = w.mobility ?? []
+                        if (!cardioDesc && !cardioItems?.length && !mobility.length) return null
+                        return (
+                          <div className="workout-card-entry">
+                            <div className="workout-card-subsection-label">Warm-up</div>
+                            {cardioDesc && (
+                              <div className="workout-card-entry-notes">
+                                {cardioDesc.type}{cardioDesc.duration ? ` — ${cardioDesc.duration}` : ''}{cardioDesc.intensity ? ` (${cardioDesc.intensity})` : ''}
+                              </div>
+                            )}
+                            {cardioItems?.map((item, i) => (
+                              <div key={`warmup-cardio-${i}`} className="workout-card-entry-notes">
+                                {item.name ?? item.exercise ?? 'Cardio'}
+                              </div>
+                            ))}
+                            {mobility.map((item, i) => (
+                              <div key={`warmup-mobility-${i}`} className="workout-card-entry-notes">
+                                {item.name ?? item.exercise ?? 'Item'}{item.reps ? ` — ${item.reps}` : item.duration ? ` — ${item.duration}` : ''}
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      })()}
                       {(workout.entries ?? []).map((entry, ei) => (
                         <div key={`${entry.exerciseId}-${ei}`} className="workout-card-entry">
                           <div className="workout-card-entry-name"><ExerciseTip exerciseId={entry.exerciseId} /></div>
@@ -121,6 +151,21 @@ export default function Workout() {
                           {opt.target && <div className="workout-card-entry-notes">{opt.target}</div>}
                         </div>
                       ))}
+                      {workout.cooldown && (() => {
+                        const cd = workout.cooldown
+                        const stretches = Array.isArray(cd) ? cd : (cd.stretching ?? [])
+                        if (!stretches.length) return null
+                        return (
+                          <div className="workout-card-entry">
+                            <div className="workout-card-subsection-label">Cooldown</div>
+                            {stretches.map((item, i) => (
+                              <div key={`cooldown-${i}`} className="workout-card-entry-notes">
+                                {item.name ?? item.exercise ?? 'Stretch'}{item.duration ? ` — ${item.duration}` : item.reps ? ` — ${item.reps}` : ''}
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      })()}
                       {workout.id && !isWorkoutCompleted(workout) && (
                         <div className="workout-card-delete-row">
                           <button
@@ -138,6 +183,7 @@ export default function Workout() {
             })}
           </section>
         ))}
+      </div>
       </div>
     </div>
   )

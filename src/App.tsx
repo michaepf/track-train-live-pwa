@@ -159,6 +159,7 @@ export default function App() {
   const [chatHasUnread, setChatHasUnread] = useState(false)
   const [showFirstTimeModal, setShowFirstTimeModal] = useState(false)
   const [chatSeedMessage, setChatSeedMessage] = useState<string | null>(null)
+  const [chatOverlayOpen, setChatOverlayOpen] = useState(false)
 
   useEffect(() => {
     if (isCallbackUrl()) {
@@ -224,6 +225,7 @@ export default function App() {
   }, [])
 
   function handleTabChange(nextScreen: ScreenId) {
+    setChatOverlayOpen(false)
     if (nextScreen === screen) return
     if (nextScreen === 'chat') setChatHasUnread(false)
     setScreen(nextScreen)
@@ -255,21 +257,37 @@ export default function App() {
     return <LoginScreen error={callbackError} />
   }
 
+  const chatMode: 'full' | 'overlay' | 'hidden' =
+    screen === 'chat' ? 'full' : chatOverlayOpen ? 'overlay' : 'hidden'
+
   return (
     <ErrorBoundary>
       <ApiKeyContext.Provider value={apiKey}>
         <div className="app">
           <main className="screen">
-            <div style={screen !== 'chat' ? { display: 'none' } : undefined}>
+            {screen !== 'chat' && renderActiveScreen()}
+            {chatMode === 'overlay' && (
+              <div className="chat-overlay-backdrop" onClick={() => setChatOverlayOpen(false)} />
+            )}
+            <div style={chatMode === 'hidden' ? { display: 'none' } : undefined}>
               <Chat
-                isActive={screen === 'chat'}
+                isActive={chatMode !== 'hidden'}
+                variant={chatMode === 'overlay' ? 'overlay' : 'full'}
+                onClose={() => setChatOverlayOpen(false)}
                 onStreamingChange={setChatStreaming}
                 onNewResponse={() => setChatHasUnread(true)}
                 seedMessage={chatSeedMessage ?? undefined}
                 onSeedConsumed={() => setChatSeedMessage(null)}
               />
             </div>
-            {screen !== 'chat' && renderActiveScreen()}
+            {screen !== 'chat' && !chatOverlayOpen && (
+              <button className="chat-fab" onClick={() => setChatOverlayOpen(true)} aria-label="Open chat">
+                💬
+                {(chatHasUnread || chatStreaming) && (
+                  <span className={`chat-fab__dot${chatHasUnread ? '' : ' chat-fab__dot--working'}`} />
+                )}
+              </button>
+            )}
           </main>
           <nav className="tab-bar">
             {SCREENS.map((s) => (
@@ -280,7 +298,7 @@ export default function App() {
               >
                 <span className="tab__icon">
                   {s.icon}
-                  {s.id === 'chat' && (chatHasUnread || (chatStreaming && screen !== 'chat')) && (
+                  {s.id === 'chat' && !chatOverlayOpen && (chatHasUnread || (chatStreaming && screen !== 'chat')) && (
                     <span className={`tab__dot${chatHasUnread ? '' : ' tab__dot--working'}`} />
                   )}
                 </span>
