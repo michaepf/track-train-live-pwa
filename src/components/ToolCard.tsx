@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import MarkdownText from './MarkdownText.tsx'
 import ExerciseTip from './ExerciseTip.tsx'
-import { formatSetLabel, summarizeWorkout } from '../lib/formatters.ts'
+import { formatSetLabel, summarizeWorkout, humanize } from '../lib/formatters.ts'
 import type { ProposeProfilePayload, ProposeTrainingPlanPayload, ProposeWorkoutsPayload } from '../lib/schemas/index.ts'
 
 // ─── propose_goals card ────────────────────────────────────────────────────────
@@ -65,12 +65,6 @@ interface ProposeProfileCardProps {
   profile: ProposeProfilePayload
   onAccept: () => void
   onRequestChanges: (feedback: string) => void
-}
-
-function humanize(slug: string): string {
-  return slug
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 export function ProposeProfileCard({ profile, onAccept, onRequestChanges }: ProposeProfileCardProps) {

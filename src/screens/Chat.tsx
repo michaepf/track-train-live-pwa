@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { streamChat, MODELS } from '../lib/api.ts'
+import { streamChat, MODELS, MODEL_DISPLAY_NAMES } from '../lib/api.ts'
 import type { ModelTier } from '../lib/api.ts'
 import { registerExerciseCatalog } from '../data/exercises.ts'
 import {
@@ -866,7 +866,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
                       {tier === 'affordable' ? 'Affordable' : 'Premium'}
                     </span>
                     <span className="chat-menu-option-desc">
-                      {tier === 'affordable' ? 'GLM · lower cost' : 'Claude Sonnet · higher cost'}
+                      {MODEL_DISPLAY_NAMES[tier]}
                     </span>
                   </button>
                 ))}

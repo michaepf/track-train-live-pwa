@@ -21,6 +21,11 @@ export const MODELS = {
 
 export type ModelTier = keyof typeof MODELS
 
+export const MODEL_DISPLAY_NAMES: Record<ModelTier, string> = {
+  premium: 'Claude Sonnet 5',
+  affordable: 'GLM 5.2',
+}
+
 // ─── Public types ──────────────────────────────────────────────────────────────
 
 export interface ToolDefinition {

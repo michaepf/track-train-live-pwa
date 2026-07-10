@@ -51,6 +51,14 @@ export function summarizeWorkout(workout: {
   return parts.join(' • ') || 'No details'
 }
 
+// ─── Text formatting ─────────────────────────────────────────────────────────
+
+export function humanize(slug: string): string {
+  return slug
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 // ─── Grouping ────────────────────────────────────────────────────────────────
 
 export function groupByDate<T extends { date: string }>(items: T[]): [string, T[]][] {

@@ -18,6 +18,7 @@ import {
   clearWorkoutsOnly,
 } from '../lib/db.ts'
 import { logout } from '../lib/auth.ts'
+import { humanize } from '../lib/formatters.ts'
 import {
   getWeekKey,
   generateWeeklySummary,
@@ -367,7 +368,7 @@ export default function Settings() {
               <p><strong>Experience:</strong> {profileData.experience}</p>
               <p><strong>Available days/week:</strong> {profileData.availableDays}</p>
               {profileData.sessionMinutes && <p><strong>Session length:</strong> ~{profileData.sessionMinutes} min</p>}
-              <p><strong>Equipment:</strong> {profileData.equipment.join(', ')}</p>
+              <p><strong>Equipment:</strong> {profileData.equipment.map(humanize).join(', ')}</p>
               {profileData.injuries && <p><strong>Injuries/limitations:</strong> {profileData.injuries}</p>}
               {profileData.notes && <p><strong>Notes:</strong> {profileData.notes}</p>}
             </div>
