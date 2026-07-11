@@ -133,8 +133,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
 
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  // Capture seed on mount — survives the prop being cleared by onSeedConsumed
-  const seedMessageRef = useRef<string | null>(seedMessage ?? null)
+  const consumingSeedRef = useRef(false)
   const isActiveRef = useRef(isActive)
   const fakeToolRetryRef = useRef(0)
   const toolRetryCountsRef = useRef<ToolRetryCounts>({ validation: 0, execution: 0 })
@@ -263,35 +262,6 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     isActiveRef.current = isActive
   }, [isActive])
 
-  // Notify App that the seed message has been consumed so it isn't re-applied on next mount.
-  useEffect(() => {
-    if (seedMessage) onSeedConsumed?.()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  /**
-   * Captured once on mount — survives the prop being cleared by onSeedConsumed.
-   * Prepended as a hidden instruction on the first send when Chat is launched
-   * from the post-workout debrief modal.
-   */
-  const debriefInstructionRef = useRef<Message | null>(
-    seedMessage
-      ? {
-          role: 'user',
-          hidden: true,
-          content:
-            'The user just finished a workout and tapped "Talk to my trainer" from the completion screen. ' +
-            'Do NOT summarize or recap the workout — they just did it and already know what happened. ' +
-            'Acknowledge how it went in one sentence at most (e.g. "Solid session" or "Tough one with those failures"). ' +
-            'Then close with ONE specific, forward-looking question. Good examples: ' +
-            '"Want to look over your next session together?" or ' +
-            '"Anything specific you want me to adjust going forward?" ' +
-            'Do NOT ask vague questions like "How did it feel overall?" — be concrete and action-oriented. ' +
-            'Keep the entire response to 2–3 sentences max.',
-        }
-      : null,
-  )
-
   // Safety net: if pendingTool exists but no actionable goals card is visible,
   // clear pending state so input never stays locked.
   useEffect(() => {
@@ -323,13 +293,31 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
 
   // Auto-send seed message (e.g. post-workout debrief) once the thread is ready.
   useEffect(() => {
-    const seed = seedMessageRef.current
-    if (!initialized || !seed || streaming || !model) return
-    seedMessageRef.current = null
-    const instruction = debriefInstructionRef.current
-    debriefInstructionRef.current = null
+    const seed = seedMessage
+    if (!seed) {
+      consumingSeedRef.current = false
+      return
+    }
+    if (!initialized || streaming || !model || consumingSeedRef.current) return
+    consumingSeedRef.current = true
+    // Clear the App-owned seed immediately. Chat normally remains mounted while
+    // hidden, so seeds must be consumed when the prop changes, not only on mount.
+    onSeedConsumed?.()
+    const instruction: Message = {
+      role: 'user',
+      hidden: true,
+      content:
+        'The user just finished a workout and tapped "Talk to my trainer" from the completion screen. ' +
+        'Do NOT summarize or recap the workout — they just did it and already know what happened. ' +
+        'Acknowledge how it went in one sentence at most (e.g. "Solid session" or "Tough one with those failures"). ' +
+        'Then close with ONE specific, forward-looking question. Good examples: ' +
+        '"Want to look over your next session together?" or ' +
+        '"Anything specific you want me to adjust going forward?" ' +
+        'Do NOT ask vague questions like "How did it feel overall?" — be concrete and action-oriented. ' +
+        'Keep the entire response to 2–3 sentences max.',
+    }
     const userMsg: Message = { role: 'user', content: seed }
-    const thread: Message[] = instruction ? [instruction, userMsg] : [userMsg]
+    const thread: Message[] = [...messages, instruction, userMsg]
     setMessages(thread)
     const capturedGoals = goals
     const capturedMode = mode
@@ -339,7 +327,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     })
     // Intentionally omit doStream/persistConv — stable within this effect's lifecycle
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialized])
+  }, [initialized, seedMessage, streaming, model, messages, onSeedConsumed])
 
   // ─── Streaming ───────────────────────────────────────────────────────────────
 
@@ -617,10 +605,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     setToolActivity(null)
     setToolRecoveryAction(null)
     const userMsg: Message = { role: 'user', content: text }
-    // Prepend debrief instruction on the very first send from the post-workout modal, then clear it
-    const prefix: Message[] = debriefInstructionRef.current && messages.length === 0 ? [debriefInstructionRef.current] : []
-    debriefInstructionRef.current = null
-    const newThread = [...messages, ...prefix, userMsg]
+    const newThread = [...messages, userMsg]
     setMessages(newThread)
     setInput('')
     toolRetryCountsRef.current = { validation: 0, execution: 0 }

@@ -165,6 +165,19 @@ describe('buildHistoryContext', () => {
     expect(ctx).toContain('Done') // compact format: 'completed' → 'Done'
   })
 
+  it('defines the compact marker for unlogged sets once in the history heading', () => {
+    const workoutWithUnloggedSet: Workout = {
+      ...sampleWorkout,
+      entries: [
+        { exerciseId: 'bench-press', sets: [{ plannedReps: 8, plannedWeight: 135 }] },
+      ],
+    }
+    const ctx = buildHistoryContext([workoutWithUnloggedSet], new Map())
+
+    expect(ctx).toContain('— = unlogged')
+    expect(ctx).toContain('bench-press | 8x135 | —')
+  })
+
   it('includes summary for older weeks', () => {
     // Workout old enough to fall outside the configured detailed-history window.
     const oldDate = new Date()

@@ -76,10 +76,23 @@ export default function MarkdownText({ text }: MarkdownTextProps) {
     // Bullet list
     if (trimmed.startsWith('- ')) {
       const items: ReactNode[] = []
-      while (i < lines.length && lines[i].trim().startsWith('- ')) {
-        const itemText = lines[i].trim().slice(2)
-        items.push(<li key={`li-${i}`}>{renderInline(itemText)}</li>)
-        i += 1
+      while (i < lines.length) {
+        if (lines[i].trim().startsWith('- ')) {
+          const itemText = lines[i].trim().slice(2)
+          items.push(<li key={`li-${i}`}>{renderInline(itemText)}</li>)
+          i += 1
+          continue
+        }
+
+        // Models often put blank lines between Markdown list items. Keep those
+        // items in one list, but stop if the next content is not another bullet.
+        let next = i
+        while (next < lines.length && !lines[next].trim()) next += 1
+        if (next > i && next < lines.length && lines[next].trim().startsWith('- ')) {
+          i = next
+          continue
+        }
+        break
       }
       nodes.push(<ul key={`ul-${i}`} className="md-list">{items}</ul>)
       continue
@@ -88,10 +101,23 @@ export default function MarkdownText({ text }: MarkdownTextProps) {
     // Numbered list
     if (/^\d+\.\s/.test(trimmed)) {
       const items: ReactNode[] = []
-      while (i < lines.length && /^\d+\.\s/.test(lines[i].trim())) {
-        const itemText = lines[i].trim().replace(/^\d+\.\s/, '')
-        items.push(<li key={`li-${i}`}>{renderInline(itemText)}</li>)
-        i += 1
+      while (i < lines.length) {
+        if (/^\d+\.\s/.test(lines[i].trim())) {
+          const itemText = lines[i].trim().replace(/^\d+\.\s/, '')
+          items.push(<li key={`li-${i}`}>{renderInline(itemText)}</li>)
+          i += 1
+          continue
+        }
+
+        // Repeated `1.` markers and blank separators are valid/common Markdown.
+        // Browser numbering works as intended when they share a single <ol>.
+        let next = i
+        while (next < lines.length && !lines[next].trim()) next += 1
+        if (next > i && next < lines.length && /^\d+\.\s/.test(lines[next].trim())) {
+          i = next
+          continue
+        }
+        break
       }
       nodes.push(<ol key={`ol-${i}`} className="md-list">{items}</ol>)
       continue

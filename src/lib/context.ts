@@ -277,7 +277,7 @@ export function buildHistoryContext(
   // Recent workouts: compact detail, most-recent-first
   if (recentWorkouts.length > 0) {
     const recentLines = recentWorkouts.map(formatWorkoutCompact)
-    parts.push('Recent workouts (last 3 weeks):\n' + recentLines.join('\n'))
+    parts.push('Recent workouts (last 6 weeks; — = unlogged):\n' + recentLines.join('\n'))
   }
 
   // Older weeks: one summary line per week (trend signal only), most-recent-first
