@@ -9,18 +9,13 @@ import {
   needsGoalReview,
   needsPlanReview,
   getWeekKey,
-  getToday,
   RECENT_HISTORY_DAYS,
 } from '../lib/context.ts'
 import { useApiKey } from '../App.tsx'
 import {
   getGoals,
-  saveGoals,
   getProfile,
-  saveProfile,
   getTrainingPlan,
-  saveTrainingPlan,
-  saveWorkout,
   saveConversation,
   listConversations,
   listWorkouts,
@@ -30,12 +25,6 @@ import {
   getCustomExercises,
 } from '../lib/db.ts'
 import type { Exercise } from '../data/exercises.ts'
-import {
-  GoalsSchema,
-  UserProfileSchema,
-  TrainingPlanSchema,
-  WorkoutSchema,
-} from '../lib/schemas/index.ts'
 import type {
   Goals,
   UserProfile,
@@ -43,9 +32,6 @@ import type {
   Conversation,
   Message,
   ConversationType,
-  ProposeProfilePayload,
-  ProposeTrainingPlanPayload,
-  ProposeWorkoutsPayload,
 } from '../lib/schemas/index.ts'
 import type { StreamResult } from '../lib/api.ts'
 import {
@@ -53,9 +39,9 @@ import {
   ProposeGoalsCard,
   ProposeTrainingPlanCard,
   ProposeWorkoutCard,
-  ToolErrorCard,
 } from '../components/ToolCard.tsx'
 import MarkdownText from '../components/MarkdownText.tsx'
+import { ToolActivity } from '../components/ToolActivity.tsx'
 import {
   PROPOSE_PROFILE_TOOL,
   PROPOSE_GOALS_TOOL,
@@ -67,14 +53,14 @@ import {
   EDIT_WORKOUT_TOOL,
   SWAP_EXERCISE_TOOL,
   looksLikeFakeToolNarration,
-  getToolSchemaHint,
-  resolveToolCall,
 } from '../lib/chatTools.ts'
 import type { PendingTool, ToolCardState } from '../lib/chatTools.ts'
 import { executeToolAction, buildEditWorkoutFollowupPrompt, buildSwapExerciseFollowupPrompt, buildDeleteFutureWorkoutsFollowupPrompt } from '../lib/toolExecutors.ts'
+import { runToolOperation } from '../lib/toolRuntime.ts'
+import type { ToolActivityViewModel, ToolRecoveryAction, ToolRetryCounts } from '../lib/toolRuntime.ts'
+import { useProposalActions } from '../hooks/useProposalActions.ts'
 
 const MAX_FAKE_TOOL_RETRIES = 2
-const MAX_TOOL_VALIDATION_RETRIES = 2
 const ONBOARDING_WELCOME_MESSAGE = `Welcome to Rubato Coach! I'm your AI personal trainer.
 
 Here's how it works: we'll start with a short conversation about your goals and fitness background. From there, I'll build a personalised workout plan — view upcoming sessions on the **Workouts** tab. On the day of a workout, use the **Today** tab to record how it went. Past sessions are saved to the **Log** tab. Come back here anytime to adjust your plan.
@@ -117,6 +103,8 @@ interface ChatProps {
   onClose?: () => void
 }
 
+type ChatRecoveryAction = ToolRecoveryAction | 'retry_stream'
+
 export default function Chat({ onStreamingChange, onNewResponse, isActive = true, seedMessage, onSeedConsumed, variant = 'full', onClose }: ChatProps) {
   const apiKey = useApiKey()
 
@@ -131,12 +119,12 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
 
   const [streaming, setStreaming] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
-  const [streamError, setStreamError] = useState<string | null>(null)
-  const [toolActionBusy, setToolActionBusy] = useState(false)
 
   const [input, setInput] = useState('')
   const [toolCard, setToolCard] = useState<ToolCardState | null>(null)
   const [pendingTool, setPendingTool] = useState<PendingTool | null>(null)
+  const [toolActivity, setToolActivity] = useState<ToolActivityViewModel | null>(null)
+  const [toolRecoveryAction, setToolRecoveryAction] = useState<ChatRecoveryAction | null>(null)
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [resetArmed, setResetArmed] = useState(false)
@@ -149,7 +137,43 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
   const seedMessageRef = useRef<string | null>(seedMessage ?? null)
   const isActiveRef = useRef(isActive)
   const fakeToolRetryRef = useRef(0)
-  const toolValidationRetryRef = useRef(0)
+  const toolRetryCountsRef = useRef<ToolRetryCounts>({ validation: 0, execution: 0 })
+
+  const {
+    busy: toolActionBusy,
+    acceptGoals: handleAcceptGoals,
+    acceptProfile: handleAcceptProfile,
+    acceptTrainingPlan: handleAcceptTrainingPlan,
+    acceptWorkouts: handleAcceptWorkouts,
+    requestChanges: handleRequestChanges,
+    resetAcceptedWorkoutCount,
+  } = useProposalActions({
+    pendingTool,
+    setPendingTool,
+    setToolCard,
+    messages,
+    setMessages,
+    conv,
+    setConv,
+    mode,
+    setMode,
+    goals,
+    setGoals,
+    profile,
+    setProfile,
+    trainingPlan,
+    setTrainingPlan,
+    model,
+    customExercises,
+    setToolActivity,
+    clearToolRecovery: () => setToolRecoveryAction(null),
+    resetToolRetries: () => {
+      fakeToolRetryRef.current = 0
+      toolRetryCountsRef.current = { validation: 0, execution: 0 }
+    },
+    persistConversation: persistConv,
+    stream: doStream,
+  })
 
   // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -228,6 +252,12 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
   useEffect(() => {
     onStreamingChange?.(streaming)
   }, [streaming, onStreamingChange])
+
+  useEffect(() => {
+    if (toolActivity?.status !== 'succeeded') return
+    const timeout = window.setTimeout(() => setToolActivity(null), 4500)
+    return () => window.clearTimeout(timeout)
+  }, [toolActivity])
 
   useEffect(() => {
     isActiveRef.current = isActive
@@ -340,7 +370,6 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
 
     setStreaming(true)
     setStreamingContent('')
-    setStreamError(null)
     setToolCard(null)
 
     // Build history context — planning always, goal_review always, onboarding if workout data exists
@@ -415,107 +444,83 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
         if (result.toolCall) {
           const tc: PendingTool = result.toolCall
           console.log('[chat] tool call received:', tc.name, 'id:', tc.id, 'args length:', tc.arguments.length)
-          const resolved = resolveToolCall(tc, new Set(currentCustomExercises.map((e) => e.id)))
-          console.log('[chat] resolveToolCall result:', resolved.kind, resolved.kind === 'card' ? resolved.cardState.kind : resolved.kind === 'error' ? resolved.message : '')
-          if (resolved.kind === 'error') {
-            // Auto-resolve: append tool error result so the thread stays valid.
-            // Input remains enabled — user can keep chatting.
+          const runtimeResult = await runToolOperation({
+            toolCall: tc,
+            customExerciseIds: new Set(currentCustomExercises.map((exercise) => exercise.id)),
+            retries: toolRetryCountsRef.current,
+            execute: (execution) => executeToolAction(execution, {
+              customExercises: currentCustomExercises,
+              onExercisesChanged: (updated) => {
+                setCustomExercises(updated)
+                registerExerciseCatalog(updated)
+              },
+            }),
+            onActivity: (activity) => {
+              setToolActivity(activity)
+              setToolRecoveryAction(null)
+            },
+          })
+
+          if (runtimeResult.kind === 'retry_model') {
+            toolRetryCountsRef.current = runtimeResult.retries
+            setToolActivity(runtimeResult.activity)
+            setToolRecoveryAction(null)
             finalMessages = [
               ...finalMessages,
-              {
-                role: 'tool' as const,
-                content: `Error: ${resolved.message}`,
-                toolCallId: tc.id,
-              },
+              { role: 'tool', content: runtimeResult.toolResult, toolCallId: tc.id },
             ]
-            if (toolValidationRetryRef.current < MAX_TOOL_VALIDATION_RETRIES) {
-              toolValidationRetryRef.current += 1
-              const retryInstruction: Message = {
-                role: 'user',
-                hidden: true,
-                content:
-                  `The previous ${tc.name} tool call was invalid: ${resolved.message}. ` +
-                  `Please retry now by emitting a valid ${tc.name} tool call with corrected arguments. ` +
-                  'Do not respond with plain text.\n\n' +
-                  getToolSchemaHint(tc.name),
-              }
-              const retryThread = [...finalMessages, retryInstruction]
-              setMessages(retryThread)
-              const savedConv = await persistConv(retryThread, currentConv, currentMode)
-              await doStream(retryThread, savedConv, currentMode, currentGoals, currentModel, currentCustomExercises, currentProfile, currentPlan)
-              return
-            }
-            // Retry cap reached — show error and keep input enabled.
-            setToolCard({ kind: 'error', toolName: resolved.toolName, message: resolved.message })
-          } else if (resolved.kind === 'execute') {
-            try {
-              const outcome = await executeToolAction(resolved.execution, {
-                customExercises: currentCustomExercises,
-                onExercisesChanged: (updated) => {
-                  setCustomExercises(updated)
-                  registerExerciseCatalog(updated)
-                },
-              })
-              finalMessages = [
-                ...finalMessages,
-                {
-                  role: 'tool' as const,
-                  content: outcome,
-                  toolCallId: tc.id,
-                },
-              ]
+            const retryThread: Message[] = [
+              ...finalMessages,
+              { role: 'user', hidden: true, content: runtimeResult.instruction },
+            ]
+            setMessages(retryThread)
+            const savedConv = await persistConv(retryThread, currentConv, currentMode)
+            await doStream(retryThread, savedConv, currentMode, currentGoals, currentModel, currentCustomExercises, currentProfile, currentPlan)
+            return
+          }
+
+          if (runtimeResult.kind === 'awaiting_approval') {
+            toolRetryCountsRef.current = { validation: 0, execution: 0 }
+            if (runtimeResult.cardState.kind === 'workouts') resetAcceptedWorkoutCount()
+            setPendingTool(tc)
+            setToolCard(runtimeResult.cardState)
+            setToolActivity(runtimeResult.activity)
+            setToolRecoveryAction(null)
+            // Do not append a tool result until the user accepts or requests changes.
+          } else {
+            finalMessages = [
+              ...finalMessages,
+              { role: 'tool', content: runtimeResult.toolResult, toolCallId: tc.id },
+            ]
+            setToolActivity(runtimeResult.activity)
+            toolRetryCountsRef.current = { validation: 0, execution: 0 }
+
+            if (runtimeResult.kind === 'terminal_failure') {
+              setToolRecoveryAction(runtimeResult.recoveryAction ?? null)
+            } else {
+              setToolRecoveryAction(null)
+              const executionKind = runtimeResult.outcome.operation
               if (
-                resolved.execution.kind === 'edit_workout' ||
-                resolved.execution.kind === 'swap_exercise' ||
-                resolved.execution.kind === 'delete_future_workouts'
+                executionKind === 'edit_workout' ||
+                executionKind === 'swap_exercise' ||
+                executionKind === 'delete_future_workouts'
               ) {
-                // Add a hidden nudge with explicit extracted details to avoid generic confirmations,
-                // and — for delete_future_workouts — to keep the model going into propose_workout
-                // instead of stopping after the delete step.
                 const followupPrompt =
-                  resolved.execution.kind === 'edit_workout'
-                    ? buildEditWorkoutFollowupPrompt(outcome)
-                    : resolved.execution.kind === 'swap_exercise'
-                      ? buildSwapExerciseFollowupPrompt(outcome)
-                      : buildDeleteFutureWorkoutsFollowupPrompt(outcome)
+                  executionKind === 'edit_workout'
+                    ? buildEditWorkoutFollowupPrompt(runtimeResult.outcome)
+                    : executionKind === 'swap_exercise'
+                      ? buildSwapExerciseFollowupPrompt(runtimeResult.outcome)
+                      : buildDeleteFutureWorkoutsFollowupPrompt(runtimeResult.outcome)
                 const threadWithNudge: Message[] = [
                   ...finalMessages,
-                  {
-                    role: 'user',
-                    hidden: true,
-                    content: followupPrompt,
-                  },
+                  { role: 'user', hidden: true, content: followupPrompt },
                 ]
                 setMessages(finalMessages)
                 const savedConv = await persistConv(threadWithNudge, currentConv, currentMode)
                 await doStream(threadWithNudge, savedConv, currentMode, currentGoals, currentModel, currentCustomExercises, currentProfile, currentPlan)
                 return
               }
-              finalMessages = [
-                ...finalMessages,
-                {
-                  role: 'assistant',
-                  content: outcome,
-                },
-              ]
-            } catch (err) {
-              const detail = err instanceof Error ? err.message : String(err)
-              finalMessages = [
-                ...finalMessages,
-                {
-                  role: 'tool' as const,
-                  content: `Error: ${detail}`,
-                  toolCallId: tc.id,
-                },
-              ]
-              setToolCard({ kind: 'error', toolName: tc.name, message: detail })
             }
-          } else {
-            // Valid tool call — user must accept or reject before thread continues
-            toolValidationRetryRef.current = 0
-            setPendingTool(tc)
-            setToolCard(resolved.cardState)
-            // Do NOT append a tool result yet; that happens on accept/reject
           }
         }
 
@@ -529,15 +534,14 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
           (currentMode === 'onboarding' || currentMode === 'goal_review' || currentMode === 'planning') &&
           looksLikeFakeToolNarration(result.content)
         ) {
-          const expectedTool = currentMode === 'planning' ? 'propose_workout' : 'propose_goals'
           if (fakeToolRetryRef.current < MAX_FAKE_TOOL_RETRIES) {
             fakeToolRetryRef.current += 1
-            setToolCard({
-              kind: 'error',
-              toolName: expectedTool,
-              message:
-                'Model narrated a tool call instead of emitting one. Press Send to retry with a strict tool-call request.',
+            setToolActivity({
+              status: 'failed',
+              message: 'The trainer described a change but did not send it to the app.',
+              nextStep: 'Press Send to ask the trainer to submit the change correctly.',
             })
+            setToolRecoveryAction(null)
 
             // Queue a strict follow-up prompt in the input instead of auto-retrying.
             // This keeps the UI responsive and avoids retry loops that feel frozen.
@@ -549,23 +553,27 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
             return
           }
 
-          setToolCard({
-            kind: 'error',
-            toolName: expectedTool,
-            message:
-              currentMode === 'planning'
-                ? 'Model did not emit a real tool call. Send a message asking it to call propose_workout.'
-                : 'Model did not emit a real tool call. Send a message asking it to call propose_goals.',
+          setToolActivity({
+            status: 'failed',
+            message: 'The trainer could not submit the requested change.',
+            nextStep: 'Rephrase the request or ask the trainer to try another approach.',
           })
+          setToolRecoveryAction('ask_trainer')
           return
         }
 
       },
 
       onError: (err: Error) => {
+        console.error('[chat] stream error:', err)
         setStreamingContent('')
         setStreaming(false)
-        setStreamError(err.message)
+        setToolActivity({
+          status: 'failed',
+          message: "The trainer's response was interrupted.",
+          nextStep: 'Try sending the last message again.',
+        })
+        setToolRecoveryAction('retry_stream')
       },
     })
   }
@@ -606,6 +614,8 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     const text = input.trim()
     if (!text || streaming || pendingTool) return
 
+    setToolActivity(null)
+    setToolRecoveryAction(null)
     const userMsg: Message = { role: 'user', content: text }
     // Prepend debrief instruction on the very first send from the post-workout modal, then clear it
     const prefix: Message[] = debriefInstructionRef.current && messages.length === 0 ? [debriefInstructionRef.current] : []
@@ -613,7 +623,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     const newThread = [...messages, ...prefix, userMsg]
     setMessages(newThread)
     setInput('')
-    toolValidationRetryRef.current = 0
+    toolRetryCountsRef.current = { validation: 0, execution: 0 }
 
     const savedConv = await persistConv(newThread, conv, mode)
     await doStream(newThread, savedConv, mode, goals, model, customExercises, profile, trainingPlan)
@@ -637,190 +647,23 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     setResetArmed(false)
   }
 
-  // ─── Tool card actions ────────────────────────────────────────────────────────
+  async function handleActivityRecovery() {
+    if (!toolRecoveryAction || streaming) return
 
-  async function handleAcceptGoals(text: string) {
-    if (!pendingTool) return
-
-    const now = new Date().toISOString()
-    const newGoals = GoalsSchema.parse({ text, updatedAt: now, pendingReview: false })
-    await saveGoals(newGoals)
-    setGoals(newGoals)
-
-    const toolResult: Message = {
-      role: 'tool',
-      content: 'Goals accepted.',
-      toolCallId: pendingTool.id,
+    if (toolRecoveryAction === 'retry_stream') {
+      setToolActivity(null)
+      setToolRecoveryAction(null)
+      const savedConv = await persistConv(messages, conv, mode)
+      await doStream(messages, savedConv, mode, goals, model, customExercises, profile, trainingPlan)
+      return
     }
 
-    // If training plan exists and not pending review, switch to planning
-    // Otherwise, stay in current mode so AI continues toward training plan
-    const hasValidPlan = trainingPlan && !trainingPlan.pendingReview
-    const nextMode: ConversationType = hasValidPlan ? 'planning' : mode
-    const confirmMsg: Message = {
-      role: 'assistant',
-      content: hasValidPlan
-        ? 'Great — your goals are saved. I\'m now building your workouts. You can ask me anytime to adjust any part of your plan.'
-        : 'Great — your goals are saved. Now let\'s put together a training plan based on your profile and goals.',
-    }
-    const newMessages = [...messages, toolResult, confirmMsg]
-    setMessages(newMessages)
-    setToolCard(null)
-    setPendingTool(null)
-    setMode(nextMode)
-
-    const savedConv = await persistConv(newMessages, conv, nextMode)
-    fakeToolRetryRef.current = 0
-    toolValidationRetryRef.current = 0
-    await doStream(newMessages, savedConv, nextMode, newGoals, model, customExercises, profile, trainingPlan)
-  }
-
-  async function handleAcceptProfile(profilePayload: ProposeProfilePayload) {
-    if (!pendingTool) return
-
-    const now = new Date().toISOString()
-    const newProfile = UserProfileSchema.parse({ ...profilePayload, updatedAt: now })
-    await saveProfile(newProfile)
-    setProfile(newProfile)
-
-    // If a training plan exists, mark it for review since profile changed
-    if (trainingPlan) {
-      const updatedPlan = { ...trainingPlan, pendingReview: true, updatedAt: now }
-      await saveTrainingPlan(updatedPlan)
-      setTrainingPlan(updatedPlan)
-    }
-
-    const toolResult: Message = {
-      role: 'tool',
-      content: 'Profile accepted.',
-      toolCallId: pendingTool.id,
-    }
-    const confirmMsg: Message = {
-      role: 'assistant',
-      content: goals
-        ? 'Profile updated. Let\'s review your goals and training plan next.'
-        : 'Profile saved! Now let\'s talk about your training goals.',
-    }
-    const newMessages = [...messages, toolResult, confirmMsg]
-    setMessages(newMessages)
-    setToolCard(null)
-    setPendingTool(null)
-
-    const savedConv = await persistConv(newMessages, conv, mode)
-    fakeToolRetryRef.current = 0
-    toolValidationRetryRef.current = 0
-    await doStream(newMessages, savedConv, mode, goals, model, customExercises, newProfile, trainingPlan)
-  }
-
-  async function handleAcceptTrainingPlan(planPayload: ProposeTrainingPlanPayload) {
-    if (!pendingTool) return
-
-    const now = new Date().toISOString()
-    const newPlan = TrainingPlanSchema.parse({
-      ...planPayload,
-      startDate: planPayload.startDate ?? getToday(),
-      status: 'active',
-      pendingReview: false,
-      createdAt: now,
-      updatedAt: now,
-    })
-    await saveTrainingPlan(newPlan)
-    setTrainingPlan(newPlan)
-
-    const toolResult: Message = {
-      role: 'tool',
-      content: 'Training plan accepted.',
-      toolCallId: pendingTool.id,
-    }
-    const confirmMsg: Message = {
-      role: 'assistant',
-      content:
-        `Your training plan "${newPlan.name}" is set. I'm now ready to build your workouts. ` +
-        'You can ask me anytime to adjust your plan or schedule.',
-    }
-    const newMessages = [...messages, toolResult, confirmMsg]
-    setMessages(newMessages)
-    setToolCard(null)
-    setPendingTool(null)
-
-    const nextMode: ConversationType = 'planning'
-    setMode(nextMode)
-
-    const savedConv = await persistConv(newMessages, conv, nextMode)
-    fakeToolRetryRef.current = 0
-    toolValidationRetryRef.current = 0
-    await doStream(newMessages, savedConv, nextMode, goals, model, customExercises, profile, newPlan)
-  }
-
-  async function handleAcceptWorkouts(workouts: ProposeWorkoutsPayload) {
-    if (!pendingTool || toolActionBusy) return
-    const currentPending = pendingTool
-
-    setToolActionBusy(true)
-    setStreamError(null)
-    try {
-      const now = new Date().toISOString()
-      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-
-      for (const proposal of workouts) {
-        const workoutToSave = WorkoutSchema.parse({
-          ...proposal,
-          timezone,
-          generatedAt: now,
-        })
-        // Always-append policy for AI-proposed workouts (never overwrite existing records).
-        await saveWorkout(workoutToSave)
-      }
-
-      const toolResult: Message = {
-        role: 'tool',
-        content: `Workouts accepted and saved (${workouts.length}).`,
-        toolCallId: currentPending.id,
-      }
-      const confirmMsg: Message = {
-        role: 'assistant',
-        content:
-          `Saved ${workouts.length} workout${workouts.length === 1 ? '' : 's'} to your plan. ` +
-          'You can view them on the **Workouts** tab. Feel free to ask me anytime if you\'d like to make any changes.',
-      }
-      const newMessages = [...messages, toolResult, confirmMsg]
-      setMessages(newMessages)
-      setToolCard(null)
-      setPendingTool(null)
-
-      const savedConv = await persistConv(newMessages, conv, mode)
-      fakeToolRetryRef.current = 0
-      toolValidationRetryRef.current = 0
-      // Stop here after accept. Auto-follow-up in planning can force another
-      // propose_workout turn and produce confusing retry prompts.
-      setConv(savedConv)
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err)
-      setStreamError(`Failed to save accepted workouts: ${detail}`)
-    } finally {
-      setToolActionBusy(false)
-    }
-  }
-
-  async function handleRequestChanges(feedback: string) {
-    if (!pendingTool) return
-
-    const toolResult: Message = {
-      role: 'tool',
-      content: 'User requested changes.',
-      toolCallId: pendingTool.id,
-    }
-    const userMsg: Message = { role: 'user', content: feedback }
-    const newMessages = [...messages, toolResult, userMsg]
-
-    setMessages(newMessages)
-    setToolCard(null)
-    setPendingTool(null)
-
-    const savedConv = await persistConv(newMessages, conv, mode)
-    fakeToolRetryRef.current = 0
-    toolValidationRetryRef.current = 0
-    await doStream(newMessages, savedConv, mode, goals, model, customExercises, profile, trainingPlan)
+    setInput(
+      toolRecoveryAction === 'retry_tool'
+        ? 'Please check the current data and try that operation again. Tell me clearly if it still cannot be completed.'
+        : 'Please check my current plan and try the change another way.',
+    )
+    setToolRecoveryAction(null)
   }
 
   // ─── New conversation ─────────────────────────────────────────────────────────
@@ -834,13 +677,14 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     setConv(null)
     setMessages([])
     setStreamingContent('')
-    setStreamError(null)
     setToolCard(null)
     setPendingTool(null)
+    setToolActivity(null)
+    setToolRecoveryAction(null)
     setStreaming(false)
-    setToolActionBusy(false)
     fakeToolRetryRef.current = 0
-    toolValidationRetryRef.current = 0
+    toolRetryCountsRef.current = { validation: 0, execution: 0 }
+    resetAcceptedWorkoutCount()
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────────
@@ -857,6 +701,20 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     toolActionBusy ||
     (pendingTool !== null &&
       (toolCard?.kind === 'profile' || toolCard?.kind === 'goals' || toolCard?.kind === 'trainingPlan' || toolCard?.kind === 'workouts'))
+
+  const activeToolActivity =
+    toolActivity?.status === 'running' || toolActivity?.status === 'correcting'
+  const recoveryAction = toolRecoveryAction
+    ? {
+        label: toolRecoveryAction === 'retry_stream'
+          ? 'Resend'
+          : toolRecoveryAction === 'retry_tool'
+            ? 'Try again'
+            : 'Ask trainer',
+        onSelect: handleActivityRecovery,
+        disabled: streaming,
+      }
+    : undefined
 
   return (
     <div className={`chat-screen${variant === 'overlay' ? ' chat-screen--overlay' : ''}`}>
@@ -947,7 +805,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
         )}
 
         {/* Thinking indicator (streaming but no text yet) */}
-        {streaming && !streamingContent && (
+        {streaming && !streamingContent && !activeToolActivity && (
           <div className="chat-message chat-message--assistant">
             <div className="chat-bubble chat-bubble--thinking">
               <span className="chat-thinking-dot" />
@@ -957,13 +815,11 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
           </div>
         )}
 
-        {/* Tool errors stay in-thread */}
-        {toolCard?.kind === 'error' && (
-          <ToolErrorCard toolName={toolCard.toolName} message={toolCard.message} />
+        {toolActivity && (
+          <div className="chat-tool-activity-row">
+            <ToolActivity activity={toolActivity} recoveryAction={recoveryAction} />
+          </div>
         )}
-
-        {/* Stream error */}
-        {streamError && <div className="chat-error">{streamError}</div>}
 
         <div ref={bottomRef} />
       </div>
@@ -975,6 +831,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
             profile={toolCard.profile}
             onAccept={() => handleAcceptProfile(toolCard.profile)}
             onRequestChanges={handleRequestChanges}
+            disabled={toolActionBusy}
           />
         </div>
       )}
@@ -985,6 +842,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
             proposedText={toolCard.text}
             onAccept={() => handleAcceptGoals(toolCard.text)}
             onRequestChanges={handleRequestChanges}
+            disabled={toolActionBusy}
           />
         </div>
       )}
@@ -995,6 +853,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
             plan={toolCard.plan}
             onAccept={() => handleAcceptTrainingPlan(toolCard.plan)}
             onRequestChanges={handleRequestChanges}
+            disabled={toolActionBusy}
           />
         </div>
       )}

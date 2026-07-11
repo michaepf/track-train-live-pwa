@@ -8,6 +8,7 @@ import {
   buildUpcomingPlannedContext,
   buildSystemPrompt,
   generateWeeklySummary,
+  RECENT_HISTORY_DAYS,
 } from './context.ts'
 import type { Goals, Workout } from './schemas/index.ts'
 
@@ -165,9 +166,9 @@ describe('buildHistoryContext', () => {
   })
 
   it('includes summary for older weeks', () => {
-    // Workout from 4 weeks ago
+    // Workout old enough to fall outside the configured detailed-history window.
     const oldDate = new Date()
-    oldDate.setDate(oldDate.getDate() - 28)
+    oldDate.setDate(oldDate.getDate() - RECENT_HISTORY_DAYS - 7)
     const oldDateStr = oldDate.toLocaleDateString('en-CA')
     const oldWorkout: Workout = { ...sampleWorkout, id: 2, date: oldDateStr }
     const weekKey = getWeekKey(oldDateStr)

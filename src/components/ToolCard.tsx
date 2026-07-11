@@ -10,9 +10,10 @@ interface ProposeGoalsCardProps {
   proposedText: string
   onAccept: () => void
   onRequestChanges: (feedback: string) => void
+  disabled?: boolean
 }
 
-export function ProposeGoalsCard({ proposedText, onAccept, onRequestChanges }: ProposeGoalsCardProps) {
+export function ProposeGoalsCard({ proposedText, onAccept, onRequestChanges, disabled = false }: ProposeGoalsCardProps) {
   const [showFeedback, setShowFeedback] = useState(false)
   const [feedback, setFeedback] = useState('')
 
@@ -44,13 +45,13 @@ export function ProposeGoalsCard({ proposedText, onAccept, onRequestChanges }: P
         />
       )}
       <div className="tool-card-actions">
-        <button className="tool-card-btn tool-card-btn--accept" onClick={onAccept}>
+        <button className="tool-card-btn tool-card-btn--accept" onClick={onAccept} disabled={disabled}>
           Accept
         </button>
         <button
           className="tool-card-btn tool-card-btn--reject"
           onClick={handleRequestChanges}
-          disabled={showFeedback && !feedback.trim()}
+          disabled={disabled || (showFeedback && !feedback.trim())}
         >
           {showFeedback ? 'Send feedback' : 'Request changes'}
         </button>
@@ -65,9 +66,10 @@ interface ProposeProfileCardProps {
   profile: ProposeProfilePayload
   onAccept: () => void
   onRequestChanges: (feedback: string) => void
+  disabled?: boolean
 }
 
-export function ProposeProfileCard({ profile, onAccept, onRequestChanges }: ProposeProfileCardProps) {
+export function ProposeProfileCard({ profile, onAccept, onRequestChanges, disabled = false }: ProposeProfileCardProps) {
   const [showFeedback, setShowFeedback] = useState(false)
   const [feedback, setFeedback] = useState('')
 
@@ -108,13 +110,13 @@ export function ProposeProfileCard({ profile, onAccept, onRequestChanges }: Prop
         />
       )}
       <div className="tool-card-actions">
-        <button className="tool-card-btn tool-card-btn--accept" onClick={onAccept}>
+        <button className="tool-card-btn tool-card-btn--accept" onClick={onAccept} disabled={disabled}>
           Accept
         </button>
         <button
           className="tool-card-btn tool-card-btn--reject"
           onClick={handleRequestChanges}
-          disabled={showFeedback && !feedback.trim()}
+          disabled={disabled || (showFeedback && !feedback.trim())}
         >
           {showFeedback ? 'Send feedback' : 'Request changes'}
         </button>
@@ -129,9 +131,10 @@ interface ProposeTrainingPlanCardProps {
   plan: ProposeTrainingPlanPayload
   onAccept: () => void
   onRequestChanges: (feedback: string) => void
+  disabled?: boolean
 }
 
-export function ProposeTrainingPlanCard({ plan, onAccept, onRequestChanges }: ProposeTrainingPlanCardProps) {
+export function ProposeTrainingPlanCard({ plan, onAccept, onRequestChanges, disabled = false }: ProposeTrainingPlanCardProps) {
   const [showFeedback, setShowFeedback] = useState(false)
   const [feedback, setFeedback] = useState('')
 
@@ -176,13 +179,13 @@ export function ProposeTrainingPlanCard({ plan, onAccept, onRequestChanges }: Pr
         />
       )}
       <div className="tool-card-actions">
-        <button className="tool-card-btn tool-card-btn--accept" onClick={onAccept}>
+        <button className="tool-card-btn tool-card-btn--accept" onClick={onAccept} disabled={disabled}>
           Accept plan
         </button>
         <button
           className="tool-card-btn tool-card-btn--reject"
           onClick={handleRequestChanges}
-          disabled={showFeedback && !feedback.trim()}
+          disabled={disabled || (showFeedback && !feedback.trim())}
         >
           {showFeedback ? 'Send feedback' : 'Request changes'}
         </button>
