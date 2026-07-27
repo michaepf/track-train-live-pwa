@@ -5,5 +5,7 @@ dist/
 .DS_Store
 Thumbs.db
 *.local
+# Local agent instruction files — intentionally untracked, never commit
 CLAUDE.md
+AGENTS.md
 temp/
