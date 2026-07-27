@@ -16,6 +16,8 @@ import {
   getSummary,
   saveWorkout,
   clearWorkoutsOnly,
+  getSetting,
+  setSetting,
 } from '../lib/db.ts'
 import { logout } from '../lib/auth.ts'
 import { humanize } from '../lib/formatters.ts'
@@ -165,12 +167,23 @@ export default function Settings() {
   const [armedScenario, setArmedScenario] = useState<ScenarioKey | null>(null)
   const [scenarioBusy, setScenarioBusy] = useState(false)
   const [scenarioStatus, setScenarioStatus] = useState<string | null>(null)
+  const [restTimerEnabled, setRestTimerEnabled] = useState(true)
 
   useEffect(() => {
     getGoals().then(setGoals)
     getProfile().then(setProfileData)
     getTrainingPlan().then(setPlanData)
+    getSetting('restTimerEnabled').then((value) => {
+      // Default on when unset — matches prior always-on behavior
+      setRestTimerEnabled(value !== 'false')
+    })
   }, [])
+
+  async function handleRestTimerToggle() {
+    const next = !restTimerEnabled
+    setRestTimerEnabled(next)
+    await setSetting('restTimerEnabled', next ? 'true' : 'false')
+  }
 
   function startEditingGoals() {
     setGoalsDraft(goals?.text ?? '')
@@ -494,6 +507,29 @@ export default function Settings() {
             </p>
           </div>
         )}
+      </section>
+
+      {/* Workout */}
+      <section className="settings-section">
+        <div className="settings-label">Workout</div>
+        <div className="settings-toggle-row">
+          <div className="settings-toggle-text">
+            <span className="settings-toggle-label">Rest timer</span>
+            <span className="settings-toggle-desc">
+              Show a countdown between sets after logging
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={restTimerEnabled}
+            aria-label="Rest timer"
+            className={`settings-switch${restTimerEnabled ? ' settings-switch--on' : ''}`}
+            onClick={handleRestTimerToggle}
+          >
+            <span className="settings-switch-thumb" />
+          </button>
+        </div>
       </section>
 
       <section className="settings-section">

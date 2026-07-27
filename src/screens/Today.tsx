@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { getWorkoutsByDate, saveWorkout, deleteWorkout } from '../lib/db.ts'
+import { getWorkoutsByDate, saveWorkout, deleteWorkout, getSetting } from '../lib/db.ts'
 import { getToday } from '../lib/context.ts'
 import { getExerciseName, getExercise } from '../data/exercises.ts'
 import { formatDateLabel, formatSetLabel, addDays } from '../lib/formatters.ts'
@@ -38,6 +38,7 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
   const [animatingWorkoutId, setAnimatingWorkoutId] = useState<number | null>(null)
   const [showDebriefModal, setShowDebriefModal] = useState<number | null>(null)
   const [restTimer, setRestTimer] = useState<{ duration: number; exerciseName: string; key: number } | null>(null)
+  const [restTimerEnabled, setRestTimerEnabled] = useState(true)
   const restTimerKeyRef = useRef(0)
   const noteSaveTimersRef = useRef<Record<string, number>>({})
 
@@ -151,6 +152,12 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
   }, [viewDate])
 
   useEffect(() => {
+    getSetting('restTimerEnabled').then((value) => {
+      setRestTimerEnabled(value !== 'false')
+    })
+  }, [])
+
+  useEffect(() => {
     return () => {
       for (const timer of Object.values(noteSaveTimersRef.current)) {
         window.clearTimeout(timer)
@@ -205,7 +212,7 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
 
     // Start rest timer when logging a set (not when un-logging)
     const newDifficulty = nextDifficulty(set?.difficulty, desired)
-    if (!wasAlreadyLogged && newDifficulty && entry) {
+    if (restTimerEnabled && !wasAlreadyLogged && newDifficulty && entry) {
       const exercise = getExercise(entry.exerciseId)
       const duration = getRestDuration(exercise?.tags ?? [])
       restTimerKeyRef.current += 1
