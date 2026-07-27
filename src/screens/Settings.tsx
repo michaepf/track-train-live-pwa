@@ -16,8 +16,8 @@ import {
   getSummary,
   saveWorkout,
   clearWorkoutsOnly,
-  getSetting,
-  setSetting,
+  getRestTimerEnabled,
+  saveRestTimerEnabled,
 } from '../lib/db.ts'
 import { logout } from '../lib/auth.ts'
 import { humanize } from '../lib/formatters.ts'
@@ -173,16 +173,18 @@ export default function Settings() {
     getGoals().then(setGoals)
     getProfile().then(setProfileData)
     getTrainingPlan().then(setPlanData)
-    getSetting('restTimerEnabled').then((value) => {
-      // Default on when unset — matches prior always-on behavior
-      setRestTimerEnabled(value !== 'false')
-    })
+    getRestTimerEnabled().then(setRestTimerEnabled)
   }, [])
 
   async function handleRestTimerToggle() {
     const next = !restTimerEnabled
     setRestTimerEnabled(next)
-    await setSetting('restTimerEnabled', next ? 'true' : 'false')
+    try {
+      await saveRestTimerEnabled(next)
+    } catch {
+      // Write failed — revert so the switch never shows an unsaved state
+      setRestTimerEnabled(!next)
+    }
   }
 
   function startEditingGoals() {
@@ -514,7 +516,7 @@ export default function Settings() {
         <div className="settings-label">Workout</div>
         <div className="settings-toggle-row">
           <div className="settings-toggle-text">
-            <span className="settings-toggle-label">Rest timer</span>
+            <span className="settings-toggle-label" id="rest-timer-label">Rest timer</span>
             <span className="settings-toggle-desc">
               Show a countdown between sets after logging
             </span>
@@ -523,7 +525,7 @@ export default function Settings() {
             type="button"
             role="switch"
             aria-checked={restTimerEnabled}
-            aria-label="Rest timer"
+            aria-labelledby="rest-timer-label"
             className={`settings-switch${restTimerEnabled ? ' settings-switch--on' : ''}`}
             onClick={handleRestTimerToggle}
           >

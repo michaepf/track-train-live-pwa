@@ -1315,6 +1315,13 @@ html, body {
   transition: background 0.15s ease;
 }
 
+/* Extends the tap target to 56x44 without changing the pill's look */
+.settings-switch::before {
+  content: '';
+  position: absolute;
+  inset: -8px -4px;
+}
+
 .settings-switch--on {
   background: var(--accent);
 }

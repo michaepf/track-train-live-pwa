@@ -17,6 +17,8 @@ import {
   saveSummary,
   getSetting,
   setSetting,
+  getRestTimerEnabled,
+  saveRestTimerEnabled,
   deleteSetting,
 } from './db.ts'
 import type { Goals, Workout } from './schemas/index.ts'
@@ -252,5 +254,18 @@ describe('settings', () => {
     await setSetting('apiKey', 'sk-test-123')
     await deleteSetting('apiKey')
     expect(await getSetting('apiKey')).toBeNull()
+  })
+})
+
+describe('rest timer setting', () => {
+  it('defaults to enabled when unset', async () => {
+    expect(await getRestTimerEnabled()).toBe(true)
+  })
+
+  it('round-trips both values', async () => {
+    await saveRestTimerEnabled(false)
+    expect(await getRestTimerEnabled()).toBe(false)
+    await saveRestTimerEnabled(true)
+    expect(await getRestTimerEnabled()).toBe(true)
   })
 })

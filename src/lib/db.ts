@@ -324,6 +324,17 @@ export async function deleteSetting(key: string): Promise<void> {
   )
 }
 
+const SETTING_REST_TIMER = 'restTimerEnabled'
+
+/** Rest timer defaults on when unset — matches the pre-setting always-on behavior. */
+export async function getRestTimerEnabled(): Promise<boolean> {
+  return (await getSetting(SETTING_REST_TIMER)) !== 'false'
+}
+
+export async function saveRestTimerEnabled(enabled: boolean): Promise<void> {
+  await setSetting(SETTING_REST_TIMER, enabled ? 'true' : 'false')
+}
+
 // ─── Exercise Catalog ─────────────────────────────────────────────────────────
 
 const SETTING_SEEDED_IDS = 'seededExerciseIds'

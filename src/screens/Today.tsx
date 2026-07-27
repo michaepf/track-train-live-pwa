@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { getWorkoutsByDate, saveWorkout, deleteWorkout, getSetting } from '../lib/db.ts'
+import { getWorkoutsByDate, saveWorkout, deleteWorkout, getRestTimerEnabled } from '../lib/db.ts'
 import { getToday } from '../lib/context.ts'
 import { getExerciseName, getExercise } from '../data/exercises.ts'
 import { formatDateLabel, formatSetLabel, addDays } from '../lib/formatters.ts'
@@ -151,10 +151,9 @@ export default function Today({ onRequestChat }: { onRequestChat?: (msg: string)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewDate])
 
+  // Re-read on mount — Today unmounts on tab switch, so a Settings change lands here
   useEffect(() => {
-    getSetting('restTimerEnabled').then((value) => {
-      setRestTimerEnabled(value !== 'false')
-    })
+    getRestTimerEnabled().then(setRestTimerEnabled)
   }, [])
 
   useEffect(() => {
