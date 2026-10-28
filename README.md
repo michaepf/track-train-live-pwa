@@ -17,6 +17,7 @@ All data is stored locally on your device using IndexedDB. Nothing leaves your d
 - Progressive Web App — installable on Android and iOS
 - **No backend.** All state lives in the browser via IndexedDB. Auth is handled through OpenRouter's OAuth flow; the API key is stored locally.
 - AI requests go directly from the browser to the OpenRouter API
+- Tests: `npm test` (vitest) and `npm run test:e2e` (Playwright, OpenRouter mocked); see [docs/TESTING.md](docs/TESTING.md)
 
 ## Deploy your own
 
