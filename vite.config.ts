@@ -11,6 +11,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
+        // No runtimeCaching for raw.githubusercontent.com: config/models.json must
+        // come from the network so edits on main reach the app (src/lib/models.ts).
         skipWaiting: true,
         clientsClaim: true,
       },

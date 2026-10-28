@@ -9,3 +9,6 @@ Thumbs.db
 CLAUDE.md
 AGENTS.md
 temp/
+# Playwright output
+playwright-report/
+test-results/

@@ -12,20 +12,6 @@ import type { Message, ThinkingBlock } from './schemas/index.ts'
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
-// ─── Model config ──────────────────────────────────────────────────────────────
-
-export const MODELS = {
-  premium: 'anthropic/claude-sonnet-5',
-  affordable: 'z-ai/glm-5.2:nitro',
-} as const
-
-export type ModelTier = keyof typeof MODELS
-
-export const MODEL_DISPLAY_NAMES: Record<ModelTier, string> = {
-  premium: 'Claude Sonnet 5',
-  affordable: 'GLM 5.2',
-}
-
 // ─── Public types ──────────────────────────────────────────────────────────────
 
 export interface ToolDefinition {
@@ -346,7 +332,7 @@ export async function streamChat(opts: StreamChatOpts): Promise<void> {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
         'HTTP-Referer': window.location.origin,
-        'X-Title': 'Track Train Live',
+        'X-Title': 'Rubato Coach',
       },
       body: JSON.stringify(body),
       signal: internal.signal,
