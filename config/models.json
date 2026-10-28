@@ -1,14 +1,14 @@
 {
-  "default": "z-ai/glm-5.2:nitro",
+  "default": "openai/gpt-6-luna",
   "models": [
     {
-      "id": "z-ai/glm-5.2:nitro",
-      "label": "GLM 5.2",
+      "id": "openai/gpt-6-luna",
+      "label": "GPT-6 Luna",
       "note": "Affordable"
     },
     {
-      "id": "anthropic/claude-sonnet-5",
-      "label": "Claude Sonnet 5",
+      "id": "anthropic/claude-sonnet-5.5",
+      "label": "Claude Sonnet 5.5",
       "note": "Premium"
     }
   ]
