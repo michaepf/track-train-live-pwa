@@ -217,3 +217,38 @@ describe('streamChat — successful stream', () => {
     expect(BASE_OPTS.onDone.mock.calls[0][0].content).toBe('hi')
   })
 })
+
+describe('streamChat — request', () => {
+  it('sends the chosen model id and the Rubato Coach app title', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: makeSSEStream(['data: [DONE]']),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamChat({ ...BASE_OPTS, model: 'openai/gpt-6.1-sol' })
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(init.headers['X-Title']).toBe('Rubato Coach')
+    const body = JSON.parse(init.body)
+    expect(body.model).toBe('openai/gpt-6.1-sol')
+    expect(body.reasoning).toEqual({ enabled: true })
+    expect(body.thinking).toBeUndefined()
+  })
+
+  it('keeps Anthropic thinking keyed on the anthropic/ id prefix', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: makeSSEStream(['data: [DONE]']),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamChat({ ...BASE_OPTS, model: 'anthropic/claude-opus-5-5' })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.thinking).toEqual({ type: 'enabled', budget_tokens: 8000 })
+    expect(body.reasoning).toBeUndefined()
+  })
+})

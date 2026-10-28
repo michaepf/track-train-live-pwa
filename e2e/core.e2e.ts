@@ -1,6 +1,7 @@
 import { expect, test, type ConsoleMessage, type Page } from '@playwright/test'
 import { TIMEZONE } from '../playwright.config.ts'
 import { E2E_SESSION, proposeWorkoutTurn } from './fixtures/conversations.ts'
+import { mockModelsConfig } from './fixtures/models.ts'
 import { mockOpenRouter } from './fixtures/openrouter.ts'
 import { FAKE_API_KEY, seedSignedInUser, todayIn } from './fixtures/seed.ts'
 
@@ -20,6 +21,7 @@ async function openTab(page: Page, label: string) {
 
 test('the app loads signed in with no console errors', async ({ page }) => {
   const errors = watchErrors(page)
+  await mockModelsConfig(page)
   const openrouter = await mockOpenRouter(page, [])
   await seedSignedInUser(page)
 
@@ -37,6 +39,7 @@ test('the app loads signed in with no console errors', async ({ page }) => {
 test('chat proposes a workout, Today logs and completes it, Log shows it', async ({ page }) => {
   const errors = watchErrors(page)
   const today = todayIn(TIMEZONE)
+  await mockModelsConfig(page)
   const openrouter = await mockOpenRouter(page, [proposeWorkoutTurn(today)])
   await seedSignedInUser(page)
 

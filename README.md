@@ -18,6 +18,7 @@ All data is stored locally on your device using IndexedDB. Nothing leaves your d
 - **No backend.** All state lives in the browser via IndexedDB. Auth is handled through OpenRouter's OAuth flow; the API key is stored locally.
 - AI requests go directly from the browser to the OpenRouter API
 - Tests: `npm test` (vitest) and `npm run test:e2e` (Playwright, OpenRouter mocked); see [docs/TESTING.md](docs/TESTING.md)
+- The Chat model picker lists the models in [`config/models.json`](config/models.json) on `main`. The app fetches this file from GitHub once per app session. After editing it in GitHub's web editor, allow the raw GitHub cache (about five minutes) to propagate, then refresh/reload to load the new list—there is no hot update in an already-open session and no Netlify deploy. If an offline startup uses the built-in list, reconnect and refresh/reload to retry. Each entry is { `id`, `label`, `note` }, and `default` must be one of the ids. If the file cannot be fetched or does not validate, the app uses its built-in two-model list. A saved choice that is no longer listed falls back to `default`. Any model id beginning with `anthropic/` automatically enables Anthropic thinking; list only models compatible with the app's existing request and tool behavior, and remove incompatible entries. The app does not capability-check models.
 
 ## Deploy your own
 

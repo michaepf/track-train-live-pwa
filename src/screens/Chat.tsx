@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { streamChat, MODELS, MODEL_DISPLAY_NAMES } from '../lib/api.ts'
-import type { ModelTier } from '../lib/api.ts'
+import { streamChat } from '../lib/api.ts'
+import { loadModelsConfig, resolveModelChoice, type ModelOption } from '../lib/models.ts'
 import { registerExerciseCatalog } from '../data/exercises.ts'
 import {
   buildSystemPrompt,
@@ -116,6 +116,7 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
   const [messages, setMessages] = useState<Message[]>([])
   const [mode, setMode] = useState<ConversationType>('planning')
   const [model, setModel] = useState('')
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([])
 
   const [streaming, setStreaming] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
@@ -178,13 +179,14 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
 
   useEffect(() => {
     async function init() {
-      const [goalsData, profileData, planData, modelSetting, conversations, customEx] = await Promise.all([
+      const [goalsData, profileData, planData, modelSetting, conversations, customEx, models] = await Promise.all([
         getGoals(),
         getProfile(),
         getTrainingPlan(),
         getSetting('model'),
         listConversations(20),
         getCustomExercises(),
+        loadModelsConfig(),
       ])
       setCustomExercises(customEx)
 
@@ -211,7 +213,8 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
       setProfile(profileData)
       setTrainingPlan(planData)
       setMode(convMode)
-      setModel(modelSetting === 'premium' ? MODELS.premium : MODELS.affordable)
+      setModelOptions(models.config.models)
+      setModel(resolveModelChoice(modelSetting, models.config))
 
       // Restore most recent conversation of this type, if any
       const existing = conversations.find((c) => c.type === convMode)
@@ -621,10 +624,9 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
     }
   }
 
-  async function handleModelToggle(tier: ModelTier) {
-    const newModel = MODELS[tier]
-    setModel(newModel)
-    await setSetting('model', tier)
+  async function handleModelSelect(id: string) {
+    setModel(id)
+    await setSetting('model', id)
   }
 
   function closeMenu() {
@@ -726,18 +728,14 @@ export default function Chat({ onStreamingChange, onNewResponse, isActive = true
                 {variant !== 'overlay' && (
                   <>
                     <div className="chat-menu-section-label">Model</div>
-                    {(['affordable', 'premium'] as ModelTier[]).map((tier) => (
+                    {modelOptions.map((option) => (
                       <button
-                        key={tier}
-                        className={`chat-menu-option${model === MODELS[tier] ? ' chat-menu-option--active' : ''}`}
-                        onClick={() => { handleModelToggle(tier); closeMenu() }}
+                        key={option.id}
+                        className={`chat-menu-option${model === option.id ? ' chat-menu-option--active' : ''}`}
+                        onClick={() => { handleModelSelect(option.id); closeMenu() }}
                       >
-                        <span className="chat-menu-option-name">
-                          {tier === 'affordable' ? 'Affordable' : 'Premium'}
-                        </span>
-                        <span className="chat-menu-option-desc">
-                          {MODEL_DISPLAY_NAMES[tier]}
-                        </span>
+                        <span className="chat-menu-option-name">{option.label}</span>
+                        <span className="chat-menu-option-desc">{option.note || option.id}</span>
                       </button>
                     ))}
                     <div className="chat-menu-divider" />

@@ -23,6 +23,8 @@ First run on a new machine: `npx playwright install chromium`.
   - Today marks each set Done and completes the workout.
   - Log lists the completed session.
 
+- **No GitHub fetch.** `e2e/fixtures/models.ts` answers the app's startup fetch of `config/models.json` with a fixture list that adds `e2e/test-model`, or with a 404 to test the built-in fallback. `e2e/model-picker.e2e.ts` checks that the picker lists the file's models, that the chosen id is sent to OpenRouter and survives a reload, and that a missing file, a removed model or a legacy `premium`/`affordable` setting falls back correctly.
+
 Useful flags: `npx playwright test --headed`, `--debug`, `--ui`, and `npx playwright show-report` after a failure.
 
 ## Refreshing the fixtures
